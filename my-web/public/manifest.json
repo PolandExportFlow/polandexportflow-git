@@ -1,0 +1,22 @@
+{
+    "name": "PolandExportFlow",
+    "short_name": "PEF",
+    "description": "Secure and fast parcel forwarding from Poland. Shop Polish products, get package inspection, and ship worldwide affordably.",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#05213C",
+    "icons": [
+        {
+            "src": "/favicon.ico",
+            "sizes": "128x128",
+            "type": "image/x-icon"
+        },
+        {
+            "src": "/favicon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any maskable"
+        }
+    ]
+}

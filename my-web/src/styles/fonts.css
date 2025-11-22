@@ -1,0 +1,57 @@
+@charset "UTF-8";
+
+@font-face {
+	font-family: 'heeboRegular';
+	src: url('../../public/fonts/Heebo-Regular.ttf') format('truetype');
+	font-weight: 400;
+	font-style: normal;
+}
+
+@font-face {
+	font-family: 'heeboMedium';
+	src: url('../../public/fonts/Heebo-Medium.ttf') format('truetype');
+	font-weight: 500;
+	font-style: normal;
+}
+
+@font-face {
+	font-family: 'heeboSemiBold';
+	src: url('../../public/fonts/Heebo-Bold.ttf') format('truetype');
+	font-weight: 600;
+	font-style: normal;
+}
+
+@font-face {
+	font-family: 'heeboBold';
+	src: url('../../public/fonts/Heebo-ExtraBold.ttf') format('truetype');
+	font-weight: 700;
+	font-style: normal;
+}
+@font-face {
+    font-family: 'madeOuterLight';
+    src: url('../../public/fonts/MADEOuterSans-Light.woff2') format('woff2');
+    font-weight: 300;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'madeOuterRegular';
+    src: url('../../public/fonts/MADEOuterSans.woff2') format('woff2');
+    font-weight: 400;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'madeOuterMedium';
+    src: url('../../public/fonts/MADEOuterSans-Medium.woff2') format('woff2');
+    font-weight: 500;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'madeOuterBold';
+    src: url('../../public/fonts/MADEOuterSans-Bold.woff2') format('woff2');
+
+    font-weight: 700;
+    font-style: normal;
+}

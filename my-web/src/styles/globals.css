@@ -1,0 +1,228 @@
+@import 'tailwindcss';
+@import './fonts.css';
+@import './scrollbar.css';
+@config '../../tailwind.config.js';
+
+html {
+	scroll-behavior: smooth;
+}
+
+.wrapper {
+	max-width: 1340px;
+}
+.section {
+	@apply flex justify-center py-10 lg:pb-20 px-3 lg:px-8 w-full scroll-mt-20 ;
+}
+.section-top {
+	@apply pt-[108px] lg:pt-[180px] bg-light-blue ;
+}
+
+.font-emoji {
+	font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif !important;
+}
+
+button {
+	cursor: pointer;
+}
+p {
+	font-size: 13px;
+	line-height: 22px;
+	@apply text-middle-blue font-heebo_regular;
+}
+.p-white {
+	@apply text-white;
+}
+.p-red {
+	@apply text-red;
+}
+h1 {
+	font-size: 21px;
+	line-height: 34px;
+	@apply leading-relaxed font-made_bold text-white mt-2 md:mt-6;
+}
+
+.h1-dark {
+	@apply text-middle-blue mt-0;
+}
+h2 {
+	font-family: 'madeOuterMedium', sans-serif;
+	width: 100%;
+	@apply text-[18px] text-left mb-6 md:mb-10 text-middle-blue;
+}
+.h2-white {
+	@apply text-white;
+}
+h3 {
+	font-family: 'madeOuterRegular', sans-serif;
+	font-size: 16px;
+	@apply text-middle-blue;
+}
+.h3-white {
+	@apply text-white;
+}
+
+.h3-red:hover {
+	@apply text-red;
+}
+
+.h3-light-blue {
+	@apply text-light-blue;
+}
+
+input,
+textarea,
+select {
+	@apply text-[12px] md:text-[15px] text-middle-blue font-heebo_regular w-full rounded-md bg-white border border-middle-blue/20 transition-colors;
+}
+
+input:hover,
+textarea:hover,
+select:hover,
+input:focus,
+textarea:focus,
+select:focus {
+	@apply border-middle-blue/80;
+}
+
+input,
+textarea {
+	@apply outline-none;
+}
+
+
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type=number] {
+  -moz-appearance: textfield;
+  appearance: none; /* 👈 standardowa właściwość dla kompatybilności */
+}
+
+
+input.light,
+select.light,
+textarea.light {
+	@apply bg-light-blue;
+}
+label {
+	@apply flex items-center font-heebo_regular text-middle-blue text-[12px] lg:text-[15px] mb-[12px];
+}
+li {
+	font-size: 12px;
+	line-height: 22px;
+	@apply font-heebo_regular text-middle-blue py-1;
+}
+ul li a {
+	@apply transition duration-240;
+}
+
+ul li a:hover {
+	@apply text-light-red;
+}
+.li-nav {
+	@apply text-[15px] text-dark-blue font-heebo_medium;
+}
+.footerIcon {
+	@apply flex justify-center items-center h-[38px] md:h-[48px] w-[38px] md:w-[48px] bg-white hover:bg-light-red transition-all duration-300;
+}
+.step {
+	@apply flex mb-4 md:mb-[80px] justify-between;
+}
+.stepCircle {
+	@apply w-8 h-8 mb-4 mr-3 md:hidden flex items-center justify-center  font-bold rounded-full border;
+}
+.stepNumber {
+	@apply font-made_bold text-middle-blue text-[14px];
+}
+.whiteCard {
+	@apply bg-white px-6 py-8 md:px-8 md:py-10;
+}
+b,
+strong {
+	font-weight: 500 !important;
+	@apply font-heebo_medium;
+}
+.feeTh {
+	@apply font-heebo_medium text-[12px] md:text-[15px];
+}
+.pricingTh {
+	@apply font-made_light text-[14px] md:text-[18px];
+}
+.pricingTd {
+	@apply px-3 py-4 md:p-7 md:py-6;
+}
+
+.blueTd {
+	@apply font-heebo_medium;
+}
+tr,
+td {
+	@apply font-heebo_regular text-[12px] md:text-[14px];
+}
+
+.shadow {
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08), inset 0 0 3px rgba(30, 64, 175, 0.3);
+}
+
+.shadow-red-glow {
+	box-shadow: 0 0 15px rgba(255, 77, 77, 0.6);
+}
+.europe-map {
+	width: 350px;
+	height: 342px;
+}
+
+.carrierIcon {
+	height: 1.5rem;
+	object-fit: contain;
+	width: auto;
+	max-width: 100px;
+}
+.paymentIcon {
+	height: 1.25rem;
+	object-fit: contain;
+	width: auto;
+	max-width: 80px;
+}
+
+@keyframes exportWave {
+	0% {
+		transform: translateX(0) rotate(0deg);
+	}
+	25% {
+		transform: translateX(3px) rotate(1deg);
+	}
+	50% {
+		transform: translateX(0) rotate(0deg);
+	}
+	75% {
+		transform: translateX(-3px) rotate(-1deg);
+	}
+	100% {
+		transform: translateX(0) rotate(0deg);
+	}
+}
+@media (min-width: 768px) {
+	p,
+	li {
+		font-size: 14px;
+		line-height: 30px;
+	}
+	h1 {
+		font-size: 36px;
+	}
+	h2 {
+		font-size: 26px;
+	}
+	h3 {
+		font-size: 18px;
+	}
+
+	.europe-map {
+		width: 714px;
+		height: 697px;
+	}
+}

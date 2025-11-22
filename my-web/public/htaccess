@@ -1,0 +1,55 @@
+RewriteEngine On
+
+# Przekierowanie na HTTPS
+RewriteCond %{HTTPS} !=on
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# Przekierowanie www na bez www
+RewriteCond %{HTTP_HOST} ^www\.(.*)$ [NC]
+RewriteRule ^(.*)$ https://polandexportflow.com/$1 [L,R=301]
+
+# Obsługa SPA - przekierowanie na index.html
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_URI} !^/favicon.ico$  # Wyjątek dla favicony
+RewriteRule ^ index.html [QSA,L]
+
+# Zabezpieczenie przed hotlinkingiem
+RewriteCond %{HTTP_REFERER} !^$
+RewriteCond %{HTTP_REFERER} !^https://(www\.)?polandexportflow\.com/.*$ [NC]
+RewriteRule \.(jpg|jpeg|png|gif|svg|webp)$ - [F,NC]
+
+# NOWE ZABEZPIECZENIA - Blokada dostępu do wrażliwych plików
+<Files "config.php">
+    Require all denied
+</Files>
+
+# Blokada dostępu do plików systemowych (rozszerzone)
+<FilesMatch "(\.htaccess|\.env|\.git|\.htpasswd|config\.php)">
+    Require all denied
+</FilesMatch>
+
+# Blokada dostępu do folderu PHPMailer
+<DirectoryMatch "PHPMailer">
+    Require all denied
+</DirectoryMatch>
+
+# Blokada dostępu do plików PHP poza send-email.php
+<Files "*.php">
+    Require all denied
+</Files>
+<Files "send-email.php">
+    Require all granted
+</Files>
+
+# Ustawienie CORS
+<IfModule mod_headers.c>
+    Header set Access-Control-Allow-Origin "*"
+    Header set Access-Control-Allow-Methods "GET,POST,OPTIONS"
+    Header set Access-Control-Allow-Headers "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range"
+</IfModule>
+
+# Wymuszenie poprawnego nagłówka dla favicon.ico
+<FilesMatch "favicon\.ico">
+    Header set Content-Type "image/x-icon"
+</FilesMatch>
