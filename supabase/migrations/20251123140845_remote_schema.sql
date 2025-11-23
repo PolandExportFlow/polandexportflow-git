@@ -12,15 +12,16 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 
-CREATE EXTENSION IF NOT EXISTS "pg_cron" WITH SCHEMA "pg_catalog";
+CREATE EXTENSION IF NOT EXISTS "pg_net" WITH SCHEMA "extensions";
 
 
 
 
 
 
-COMMENT ON SCHEMA "public" IS 'standard public schema';
 
+
+ALTER SCHEMA "public" OWNER TO "postgres";
 
 
 CREATE EXTENSION IF NOT EXISTS "pg_graphql" WITH SCHEMA "graphql";
@@ -37,13 +38,6 @@ CREATE EXTENSION IF NOT EXISTS "pg_stat_statements" WITH SCHEMA "extensions";
 
 
 
-CREATE EXTENSION IF NOT EXISTS "pg_trgm" WITH SCHEMA "extensions";
-
-
-
-
-
-
 CREATE EXTENSION IF NOT EXISTS "pgcrypto" WITH SCHEMA "extensions";
 
 
@@ -52,13 +46,6 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto" WITH SCHEMA "extensions";
 
 
 CREATE EXTENSION IF NOT EXISTS "supabase_vault" WITH SCHEMA "vault";
-
-
-
-
-
-
-CREATE EXTENSION IF NOT EXISTS "unaccent" WITH SCHEMA "public";
 
 
 
@@ -1575,26 +1562,23 @@ DECLARE
   v_full_name text;
   v_phone     text;
 BEGIN
-  -- e-mail zawsze lowercase (jeśli brak, podstaw pusty string, żeby UPSERT nie wywalił)
+  -- Wczytanie i czyszczenie metadanych
   v_email := lower(coalesce(NEW.email, ''));
-
-  -- full_name z metadanych; fallback: e-mail
   v_full_name := nullif(
-                   trim(
-                     coalesce(
-                       NEW.raw_user_meta_data->>'full_name',
-                       NEW.raw_user_meta_data->>'fullName',
-                       NEW.raw_user_meta_data->>'name',
-                       (coalesce(NEW.raw_user_meta_data->>'given_name','') || ' ' ||
-                        coalesce(NEW.raw_user_meta_data->>'family_name','')),
-                       v_email
-                     )
-                   ),
-                 '');
-
-  -- phone z metadanych (opcjonalnie)
+                    trim(
+                      coalesce(
+                        NEW.raw_user_meta_data->>'full_name',
+                        NEW.raw_user_meta_data->>'fullName',
+                        NEW.raw_user_meta_data->>'name',
+                        (coalesce(NEW.raw_user_meta_data->>'given_name','') || ' ' ||
+                         coalesce(NEW.raw_user_meta_data->>'family_name','')),
+                        v_email
+                      )
+                    ),
+                  '');
   v_phone := nullif(trim(coalesce(NEW.raw_user_meta_data->>'phone', '')), '');
 
+  -- INSERT OR UPDATE w tabeli public.users
   INSERT INTO public.users (
     id, email, full_name, phone, account_type, created_at, is_verified
   )
@@ -1608,14 +1592,10 @@ BEGIN
     (NEW.email_confirmed_at IS NOT NULL)
   )
   ON CONFLICT (id) DO UPDATE
-  SET email        = EXCLUDED.email,
-      -- nie nadpisuj istniejącego name pustą wartością
-      full_name    = coalesce(nullif(EXCLUDED.full_name, ''), public.users.full_name),
-      -- phone tylko jeśli dostaliśmy niepusty
+  SET email        = EXCLUDED.email, 
+      full_name    = coalesce(nullif(EXCLUDED.full_name, ''), public.users.full_name), 
       phone        = coalesce(nullif(EXCLUDED.phone, ''), public.users.phone),
-      -- jeśli ktoś skasował account_type, przywróć sensowny default
       account_type = coalesce(public.users.account_type, 'b2c'),
-      -- is_verified odzwierciedla stan z auth.users
       is_verified  = EXCLUDED.is_verified;
 
   RETURN NEW;
@@ -1787,10 +1767,6 @@ $$;
 
 
 ALTER FUNCTION "public"."trg_admin_quotes_apply_accepted"() OWNER TO "postgres";
-
-
-COMMENT ON FUNCTION "public"."trg_admin_quotes_apply_accepted"() IS 'Admin: apply accepted quote changes (trigger function)';
-
 
 
 CREATE OR REPLACE FUNCTION "public"."trg_sys_order_items_set_item_number"() RETURNS "trigger"
@@ -2718,8 +2694,6 @@ CREATE TABLE IF NOT EXISTS "public"."admin_currency_rates" (
     CONSTRAINT "admin_currency_rates_rate_pln_per_unit_check" CHECK (("currency_rate_in_pln" > (0)::numeric))
 );
 
-ALTER TABLE ONLY "public"."admin_currency_rates" FORCE ROW LEVEL SECURITY;
-
 
 ALTER TABLE "public"."admin_currency_rates" OWNER TO "postgres";
 
@@ -2732,8 +2706,6 @@ CREATE TABLE IF NOT EXISTS "public"."admin_notes" (
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     CONSTRAINT "admin_notes_category_check" CHECK (("note_category" = ANY (ARRAY['note'::"text", 'todo'::"text", 'idea'::"text"])))
 );
-
-ALTER TABLE ONLY "public"."admin_notes" FORCE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."admin_notes" OWNER TO "postgres";
@@ -2753,8 +2725,6 @@ CREATE TABLE IF NOT EXISTS "public"."admin_tasks" (
     CONSTRAINT "admin_tasks_type_check" CHECK (("task_type" = ANY (ARRAY['paczki'::"text", 'finanse'::"text", 'klienci'::"text"])))
 );
 
-ALTER TABLE ONLY "public"."admin_tasks" FORCE ROW LEVEL SECURITY;
-
 
 ALTER TABLE "public"."admin_tasks" OWNER TO "postgres";
 
@@ -2763,8 +2733,6 @@ CREATE TABLE IF NOT EXISTS "public"."admin_users" (
     "user_id" "uuid" NOT NULL,
     "assigned_sections" "text"[]
 );
-
-ALTER TABLE ONLY "public"."admin_users" FORCE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."admin_users" OWNER TO "postgres";
@@ -2884,8 +2852,6 @@ CREATE TABLE IF NOT EXISTS "public"."users" (
     CONSTRAINT "users_account_type_check" CHECK (("account_type" = ANY (ARRAY['b2c'::"text", 'b2b'::"text", 'admin'::"text"])))
 );
 
-ALTER TABLE ONLY "public"."users" FORCE ROW LEVEL SECURITY;
-
 
 ALTER TABLE "public"."users" OWNER TO "postgres";
 
@@ -2936,7 +2902,7 @@ CREATE OR REPLACE VIEW "public"."v_admin_clients_list" AS
 ALTER VIEW "public"."v_admin_clients_list" OWNER TO "postgres";
 
 
-CREATE OR REPLACE VIEW "public"."v_admin_stats_b2c_orders" WITH ("security_invoker"='true') AS
+CREATE OR REPLACE VIEW "public"."v_admin_stats_b2c_orders" AS
  SELECT "count"(*) AS "total",
     "count"(*) FILTER (WHERE ("order_status" = ANY (ARRAY['created'::"text", 'submitted'::"text"]))) AS "pending_quotes",
     "count"(*) FILTER (WHERE ("order_status" = ANY (ARRAY['quote_ready'::"text", 'preparing_order'::"text"]))) AS "in_progress",
@@ -3092,10 +3058,6 @@ CREATE INDEX "order_items_order_id_idx" ON "public"."order_items" USING "btree" 
 
 
 CREATE UNIQUE INDEX "order_items_search_order_id_key" ON "public"."order_items_search" USING "btree" ("order_id");
-
-
-
-CREATE INDEX "order_items_search_trgm" ON "public"."order_items_search" USING "gin" ("items_text" "extensions"."gin_trgm_ops");
 
 
 
@@ -3336,7 +3298,25 @@ CREATE POLICY "oq_update_admin" ON "public"."order_quotes" FOR UPDATE TO "authen
 
 
 
+ALTER TABLE "public"."order_files" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."order_items" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."order_items_files" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."order_items_search" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."order_payment" ENABLE ROW LEVEL SECURITY;
+
+
 ALTER TABLE "public"."order_payment_methods" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."order_payment_transactions" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."order_quotes" ENABLE ROW LEVEL SECURITY;
@@ -3350,11 +3330,24 @@ CREATE POLICY "order_quotes_update_own" ON "public"."order_quotes" FOR UPDATE TO
 
 
 
+ALTER TABLE "public"."orders" ENABLE ROW LEVEL SECURITY;
+
+
 CREATE POLICY "orders_update_own" ON "public"."orders" FOR UPDATE TO "authenticated" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));
 
 
 
 CREATE POLICY "orders_update_owner" ON "public"."orders" FOR UPDATE TO "authenticated" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));
+
+
+
+CREATE POLICY "user_select_items_if_own_order" ON "public"."order_items" FOR SELECT TO "authenticated" USING (("order_id" IN ( SELECT "orders"."id"
+   FROM "public"."orders"
+  WHERE ("orders"."user_id" = "auth"."uid"()))));
+
+
+
+CREATE POLICY "user_select_own_orders" ON "public"."orders" FOR SELECT TO "authenticated" USING (("user_id" = "auth"."uid"()));
 
 
 
@@ -3390,29 +3383,23 @@ ALTER PUBLICATION "supabase_realtime" OWNER TO "postgres";
 
 
 
-ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."admin_currency_rates";
 
 
 
-ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."order_items";
+REVOKE USAGE ON SCHEMA "public" FROM PUBLIC;
+GRANT ALL ON SCHEMA "public" TO PUBLIC;
 
 
 
-ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."order_quotes";
 
 
 
-ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."orders";
 
 
 
 
 
 
-GRANT USAGE ON SCHEMA "public" TO "postgres";
-GRANT USAGE ON SCHEMA "public" TO "anon";
-GRANT USAGE ON SCHEMA "public" TO "authenticated";
-GRANT USAGE ON SCHEMA "public" TO "service_role";
 
 
 
@@ -3554,686 +3541,157 @@ GRANT USAGE ON SCHEMA "public" TO "service_role";
 
 
 
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_items" TO "anon";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_items" TO "authenticated";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_items" TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_items" TO "supabase_admin";
 
 
 
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_items_files" TO "anon";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_items_files" TO "authenticated";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_items_files" TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_items_files" TO "supabase_admin";
 
 
 
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_payment_transactions" TO "anon";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_payment_transactions" TO "authenticated";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_payment_transactions" TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_payment_transactions" TO "supabase_admin";
 
 
 
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_quotes" TO "anon";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_quotes" TO "authenticated";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_quotes" TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_quotes" TO "supabase_admin";
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_get_modal_order"("p_lookup" "text", "p_limit_attachments" integer) TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_get_modal_order"("p_lookup" "text", "p_limit_attachments" integer) TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_get_modal_order"("p_lookup" "text", "p_limit_attachments" integer) TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_get_modal_profile"("p_user_id" "uuid", "p_limit_orders" integer, "p_limit_files" integer) TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_get_modal_profile"("p_user_id" "uuid", "p_limit_orders" integer, "p_limit_files" integer) TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_get_modal_profile"("p_user_id" "uuid", "p_limit_orders" integer, "p_limit_files" integer) TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_has_access"("p_section" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_has_access"("p_section" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_has_access"("p_section" "text") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_is_admin"() TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_is_admin"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_is_admin"() TO "service_role";
-
-
-
-GRANT ALL ON TABLE "public"."order_items" TO "anon";
-GRANT ALL ON TABLE "public"."order_items" TO "authenticated";
-GRANT ALL ON TABLE "public"."order_items" TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_item_add"("p_order_id" "uuid", "p_patch" "jsonb") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_item_add"("p_order_id" "uuid", "p_patch" "jsonb") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_item_add"("p_order_id" "uuid", "p_patch" "jsonb") TO "service_role";
-
-
-
-GRANT ALL ON TABLE "public"."order_items_files" TO "anon";
-GRANT ALL ON TABLE "public"."order_items_files" TO "authenticated";
-GRANT ALL ON TABLE "public"."order_items_files" TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_item_attachments_add"("p_item_id" "uuid", "p_attachments" "jsonb") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_item_attachments_add"("p_item_id" "uuid", "p_attachments" "jsonb") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_item_attachments_add"("p_item_id" "uuid", "p_attachments" "jsonb") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_item_attachments_delete"("p_item_id" "uuid", "p_attachment_ids" "text"[]) TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_item_attachments_delete"("p_item_id" "uuid", "p_attachment_ids" "text"[]) TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_item_attachments_delete"("p_item_id" "uuid", "p_attachment_ids" "text"[]) TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_item_delete"("p_item_id" "uuid") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_item_delete"("p_item_id" "uuid") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_item_delete"("p_item_id" "uuid") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_item_update"("p_item_id" "uuid", "p_patch" "jsonb") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_item_update"("p_item_id" "uuid", "p_patch" "jsonb") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_item_update"("p_item_id" "uuid", "p_patch" "jsonb") TO "service_role";
-
-
-
-GRANT ALL ON TABLE "public"."order_payment_transactions" TO "anon";
-GRANT ALL ON TABLE "public"."order_payment_transactions" TO "authenticated";
-GRANT ALL ON TABLE "public"."order_payment_transactions" TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_payment_transaction_add"("p_payment_id" "uuid", "p_order_id" "uuid", "p_amount" numeric, "p_note" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_payment_transaction_add"("p_payment_id" "uuid", "p_order_id" "uuid", "p_amount" numeric, "p_note" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_payment_transaction_add"("p_payment_id" "uuid", "p_order_id" "uuid", "p_amount" numeric, "p_note" "text") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_payment_transaction_delete"("p_transaction_id" "uuid") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_payment_transaction_delete"("p_transaction_id" "uuid") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_payment_transaction_delete"("p_transaction_id" "uuid") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_resolve_id"("p_input" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_resolve_id"("p_input" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_resolve_id"("p_input" "text") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_update_additional_info"("p_lookup" "text", "p_info" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_update_additional_info"("p_lookup" "text", "p_info" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_update_additional_info"("p_lookup" "text", "p_info" "text") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_update_address"("p_lookup" "text", "p_patch" "jsonb") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_update_address"("p_lookup" "text", "p_patch" "jsonb") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_update_address"("p_lookup" "text", "p_patch" "jsonb") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_update_admin_note"("p_lookup" "text", "p_info" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_update_admin_note"("p_lookup" "text", "p_info" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_update_admin_note"("p_lookup" "text", "p_info" "text") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_update_attachments_add"("p_order_id" "uuid", "p_user_id" "uuid", "p_files" "jsonb") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_update_attachments_add"("p_order_id" "uuid", "p_user_id" "uuid", "p_files" "jsonb") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_update_attachments_add"("p_order_id" "uuid", "p_user_id" "uuid", "p_files" "jsonb") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_update_attachments_delete"("p_file_id" "uuid") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_update_attachments_delete"("p_file_id" "uuid") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_update_attachments_delete"("p_file_id" "uuid") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_admin_data"("p_lookup" "text", "p_costs" numeric, "p_received" numeric) TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_admin_data"("p_lookup" "text", "p_costs" numeric, "p_received" numeric) TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_admin_data"("p_lookup" "text", "p_costs" numeric, "p_received" numeric) TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_note"("p_lookup" "text", "p_note" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_note"("p_lookup" "text", "p_note" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_note"("p_lookup" "text", "p_note" "text") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_products_split"("p_lookup" "text", "p_split_received" numeric) TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_products_split"("p_lookup" "text", "p_split_received" numeric) TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_products_split"("p_lookup" "text", "p_split_received" numeric) TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_products_split"("p_lookup" "text", "p_split_received" numeric, "p_split_due" numeric) TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_products_split"("p_lookup" "text", "p_split_received" numeric, "p_split_due" numeric) TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_products_split"("p_lookup" "text", "p_split_received" numeric, "p_split_due" numeric) TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_service_fee"("p_lookup" "text", "p_service_fee" numeric) TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_service_fee"("p_lookup" "text", "p_service_fee" numeric) TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_service_fee"("p_lookup" "text", "p_service_fee" numeric) TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_status"("p_lookup" "text", "p_status" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_status"("p_lookup" "text", "p_status" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_update_payment_status"("p_lookup" "text", "p_status" "text") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_order_update_status"("p_lookup" "text", "p_status" "text", "p_source" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_order_update_status"("p_lookup" "text", "p_status" "text", "p_source" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_order_update_status"("p_lookup" "text", "p_status" "text", "p_source" "text") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_quote_accept_by_id"("p_quote_id" "uuid") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_quote_accept_by_id"("p_quote_id" "uuid") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_quote_accept_by_id"("p_quote_id" "uuid") TO "service_role";
-
-
-
-GRANT ALL ON TABLE "public"."order_quotes" TO "anon";
-GRANT ALL ON TABLE "public"."order_quotes" TO "authenticated";
-GRANT ALL ON TABLE "public"."order_quotes" TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_quote_create_by_order_id"("p_order_id" "uuid", "p_rows" "jsonb", "p_valid_days" integer) TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_quote_create_by_order_id"("p_order_id" "uuid", "p_rows" "jsonb", "p_valid_days" integer) TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_quote_create_by_order_id"("p_order_id" "uuid", "p_rows" "jsonb", "p_valid_days" integer) TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_quote_create_id_by_order_id"("p_order_id" "uuid") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_quote_create_id_by_order_id"("p_order_id" "uuid") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_quote_create_id_by_order_id"("p_order_id" "uuid") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_quote_delete_by_id"("p_quote_id" "uuid") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_quote_delete_by_id"("p_quote_id" "uuid") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_quote_delete_by_id"("p_quote_id" "uuid") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_quote_expire_and_purge"("p_grace_days" integer) TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_quote_expire_and_purge"("p_grace_days" integer) TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_quote_expire_and_purge"("p_grace_days" integer) TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_quote_list_by_order_id"("p_order_id" "uuid") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_quote_list_by_order_id"("p_order_id" "uuid") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_quote_list_by_order_id"("p_order_id" "uuid") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_rebuild_items_search"() TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_rebuild_items_search"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_rebuild_items_search"() TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_tasks_delete_completed"() TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_tasks_delete_completed"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_tasks_delete_completed"() TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."admin_user_profile_update_admin_note"("p_user_id" "uuid", "p_notes" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."admin_user_profile_update_admin_note"("p_user_id" "uuid", "p_notes" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."admin_user_profile_update_admin_note"("p_user_id" "uuid", "p_notes" "text") TO "service_role";
-
-
-
-REVOKE ALL ON FUNCTION "public"."sys_check_if_user_exists"("p_email" "text") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."sys_check_if_user_exists"("p_email" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."sys_check_if_user_exists"("p_email" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."sys_check_if_user_exists"("p_email" "text") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."sys_create_pef_item_code"("p_order_code" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."sys_create_pef_item_code"("p_order_code" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."sys_create_pef_item_code"("p_order_code" "text") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."sys_create_pef_order_code"() TO "anon";
-GRANT ALL ON FUNCTION "public"."sys_create_pef_order_code"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."sys_create_pef_order_code"() TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."sys_create_pef_user_code"() TO "anon";
-GRANT ALL ON FUNCTION "public"."sys_create_pef_user_code"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."sys_create_pef_user_code"() TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."sys_handle_new_user"() TO "anon";
-GRANT ALL ON FUNCTION "public"."sys_handle_new_user"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."sys_handle_new_user"() TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."sys_storage_path_belongs_to_user"("path" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."sys_storage_path_belongs_to_user"("path" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."sys_storage_path_belongs_to_user"("path" "text") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."sys_sync_user_profile_after_update"() TO "anon";
-GRANT ALL ON FUNCTION "public"."sys_sync_user_profile_after_update"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."sys_sync_user_profile_after_update"() TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."trg_admin_quotes_apply_accepted"() TO "anon";
-GRANT ALL ON FUNCTION "public"."trg_admin_quotes_apply_accepted"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."trg_admin_quotes_apply_accepted"() TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."trg_sys_order_items_set_item_number"() TO "anon";
-GRANT ALL ON FUNCTION "public"."trg_sys_order_items_set_item_number"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."trg_sys_order_items_set_item_number"() TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."trg_sys_orders_set_order_number"() TO "anon";
-GRANT ALL ON FUNCTION "public"."trg_sys_orders_set_order_number"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."trg_sys_orders_set_order_number"() TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."trg_sys_user_set_user_code"() TO "anon";
-GRANT ALL ON FUNCTION "public"."trg_sys_user_set_user_code"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."trg_sys_user_set_user_code"() TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."unaccent"("text") TO "postgres";
-GRANT ALL ON FUNCTION "public"."unaccent"("text") TO "anon";
-GRANT ALL ON FUNCTION "public"."unaccent"("text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."unaccent"("text") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."unaccent"("regdictionary", "text") TO "postgres";
-GRANT ALL ON FUNCTION "public"."unaccent"("regdictionary", "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."unaccent"("regdictionary", "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."unaccent"("regdictionary", "text") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."unaccent_init"("internal") TO "postgres";
-GRANT ALL ON FUNCTION "public"."unaccent_init"("internal") TO "anon";
-GRANT ALL ON FUNCTION "public"."unaccent_init"("internal") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."unaccent_init"("internal") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."unaccent_lexize"("internal", "internal", "internal", "internal") TO "postgres";
-GRANT ALL ON FUNCTION "public"."unaccent_lexize"("internal", "internal", "internal", "internal") TO "anon";
-GRANT ALL ON FUNCTION "public"."unaccent_lexize"("internal", "internal", "internal", "internal") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."unaccent_lexize"("internal", "internal", "internal", "internal") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."user_get_default_address"() TO "anon";
-GRANT ALL ON FUNCTION "public"."user_get_default_address"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."user_get_default_address"() TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."user_get_modal_order"("p_lookup" "text") TO "anon";
 GRANT ALL ON FUNCTION "public"."user_get_modal_order"("p_lookup" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."user_get_modal_order"("p_lookup" "text") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."user_order_create"("p_service" "text", "p_address" "jsonb", "p_items" "jsonb", "p_order_note" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."user_order_create"("p_service" "text", "p_address" "jsonb", "p_items" "jsonb", "p_order_note" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."user_order_create"("p_service" "text", "p_address" "jsonb", "p_items" "jsonb", "p_order_note" "text") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."user_order_delete"("p_lookup" "text") TO "postgres";
-GRANT ALL ON FUNCTION "public"."user_order_delete"("p_lookup" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."user_order_delete"("p_lookup" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."user_order_delete"("p_lookup" "text") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."user_order_file_delete"("p_file_id" "uuid") TO "postgres";
-GRANT ALL ON FUNCTION "public"."user_order_file_delete"("p_file_id" "uuid") TO "anon";
-GRANT ALL ON FUNCTION "public"."user_order_file_delete"("p_file_id" "uuid") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."user_order_file_delete"("p_file_id" "uuid") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."user_order_item_add"("p_lookup" "text", "p_patch" "jsonb") TO "anon";
-GRANT ALL ON FUNCTION "public"."user_order_item_add"("p_lookup" "text", "p_patch" "jsonb") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."user_order_item_add"("p_lookup" "text", "p_patch" "jsonb") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."user_order_item_delete"("p_lookup" "text", "p_item_id" "uuid") TO "anon";
-GRANT ALL ON FUNCTION "public"."user_order_item_delete"("p_lookup" "text", "p_item_id" "uuid") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."user_order_item_delete"("p_lookup" "text", "p_item_id" "uuid") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."user_order_item_file_delete"("p_lookup" "text", "p_item_id" "uuid", "p_file_ids" "text"[]) TO "postgres";
-GRANT ALL ON FUNCTION "public"."user_order_item_file_delete"("p_lookup" "text", "p_item_id" "uuid", "p_file_ids" "text"[]) TO "anon";
-GRANT ALL ON FUNCTION "public"."user_order_item_file_delete"("p_lookup" "text", "p_item_id" "uuid", "p_file_ids" "text"[]) TO "authenticated";
-GRANT ALL ON FUNCTION "public"."user_order_item_file_delete"("p_lookup" "text", "p_item_id" "uuid", "p_file_ids" "text"[]) TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."admin_currency_rates" TO "anon";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."admin_currency_rates" TO "authenticated";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."admin_currency_rates" TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."admin_currency_rates" TO "supabase_admin";
 
 
 
-GRANT ALL ON FUNCTION "public"."user_order_item_update"("p_lookup" "text", "p_item_id" "uuid", "p_patch" "jsonb") TO "anon";
-GRANT ALL ON FUNCTION "public"."user_order_item_update"("p_lookup" "text", "p_item_id" "uuid", "p_patch" "jsonb") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."user_order_item_update"("p_lookup" "text", "p_item_id" "uuid", "p_patch" "jsonb") TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."admin_notes" TO "anon";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."admin_notes" TO "authenticated";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."admin_notes" TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."admin_notes" TO "supabase_admin";
 
 
 
-GRANT ALL ON FUNCTION "public"."user_order_update_address"("p_lookup" "text", "p_patch" "jsonb") TO "anon";
-GRANT ALL ON FUNCTION "public"."user_order_update_address"("p_lookup" "text", "p_patch" "jsonb") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."user_order_update_address"("p_lookup" "text", "p_patch" "jsonb") TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."admin_tasks" TO "anon";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."admin_tasks" TO "authenticated";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."admin_tasks" TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."admin_tasks" TO "supabase_admin";
 
 
 
-GRANT ALL ON FUNCTION "public"."user_order_update_checkout"("p_lookup" "text", "p_patch" "jsonb") TO "anon";
-GRANT ALL ON FUNCTION "public"."user_order_update_checkout"("p_lookup" "text", "p_patch" "jsonb") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."user_order_update_checkout"("p_lookup" "text", "p_patch" "jsonb") TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."admin_users" TO "anon";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."admin_users" TO "authenticated";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."admin_users" TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."admin_users" TO "supabase_admin";
 
 
 
-GRANT ALL ON FUNCTION "public"."user_order_update_note"("p_lookup" "text", "p_note" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."user_order_update_note"("p_lookup" "text", "p_note" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."user_order_update_note"("p_lookup" "text", "p_note" "text") TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_files" TO "anon";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_files" TO "authenticated";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_files" TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_files" TO "supabase_admin";
 
 
 
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_items_search" TO "anon";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_items_search" TO "authenticated";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_items_search" TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_items_search" TO "supabase_admin";
 
 
 
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_payment" TO "anon";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_payment" TO "authenticated";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_payment" TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_payment" TO "supabase_admin";
 
 
 
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_payment_methods" TO "anon";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_payment_methods" TO "authenticated";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_payment_methods" TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."order_payment_methods" TO "supabase_admin";
 
 
 
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."orders" TO "anon";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."orders" TO "authenticated";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."orders" TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."orders" TO "supabase_admin";
 
 
 
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."users" TO "anon";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."users" TO "authenticated";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."users" TO "service_role";
+GRANT SELECT,INSERT,REFERENCES,DELETE,TRIGGER,TRUNCATE,UPDATE ON TABLE "public"."users" TO "supabase_admin";
 
 
 
+GRANT SELECT ON TABLE "public"."v_users_orders_list" TO "authenticated";
 
 
 
 
 
 
-GRANT ALL ON TABLE "public"."admin_currency_rates" TO "anon";
-GRANT ALL ON TABLE "public"."admin_currency_rates" TO "authenticated";
-GRANT ALL ON TABLE "public"."admin_currency_rates" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."admin_notes" TO "anon";
-GRANT ALL ON TABLE "public"."admin_notes" TO "authenticated";
-GRANT ALL ON TABLE "public"."admin_notes" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."admin_tasks" TO "anon";
-GRANT ALL ON TABLE "public"."admin_tasks" TO "authenticated";
-GRANT ALL ON TABLE "public"."admin_tasks" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."admin_users" TO "anon";
-GRANT ALL ON TABLE "public"."admin_users" TO "authenticated";
-GRANT ALL ON TABLE "public"."admin_users" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."order_files" TO "anon";
-GRANT ALL ON TABLE "public"."order_files" TO "authenticated";
-GRANT ALL ON TABLE "public"."order_files" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."order_items_search" TO "anon";
-GRANT ALL ON TABLE "public"."order_items_search" TO "authenticated";
-GRANT ALL ON TABLE "public"."order_items_search" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."order_payment" TO "anon";
-GRANT ALL ON TABLE "public"."order_payment" TO "authenticated";
-GRANT ALL ON TABLE "public"."order_payment" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."order_payment_methods" TO "anon";
-GRANT ALL ON TABLE "public"."order_payment_methods" TO "authenticated";
-GRANT ALL ON TABLE "public"."order_payment_methods" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."orders" TO "anon";
-GRANT ALL ON TABLE "public"."orders" TO "authenticated";
-GRANT ALL ON TABLE "public"."orders" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."users" TO "anon";
-GRANT ALL ON TABLE "public"."users" TO "authenticated";
-GRANT ALL ON TABLE "public"."users" TO "service_role";
-
-
-
-GRANT ALL ON TABLE "public"."v_admin_b2c_order_list" TO "anon";
-GRANT ALL ON TABLE "public"."v_admin_b2c_order_list" TO "authenticated";
-GRANT ALL ON TABLE "public"."v_admin_b2c_order_list" TO "service_role";
-
-
-
-GRANT ALL ON TABLE "public"."v_admin_clients_list" TO "anon";
-GRANT ALL ON TABLE "public"."v_admin_clients_list" TO "authenticated";
-GRANT ALL ON TABLE "public"."v_admin_clients_list" TO "service_role";
-
-
-
-GRANT ALL ON TABLE "public"."v_admin_stats_b2c_orders" TO "anon";
-GRANT ALL ON TABLE "public"."v_admin_stats_b2c_orders" TO "authenticated";
-GRANT ALL ON TABLE "public"."v_admin_stats_b2c_orders" TO "service_role";
-
-
-
-GRANT ALL ON TABLE "public"."v_users_orders_list" TO "anon";
-GRANT ALL ON TABLE "public"."v_users_orders_list" TO "authenticated";
-GRANT ALL ON TABLE "public"."v_users_orders_list" TO "service_role";
-
-
-
-
-
-
-
-
-
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "postgres";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "anon";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "authenticated";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "service_role";
-
-
-
-
-
-
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "postgres";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "anon";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "authenticated";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "service_role";
-
-
-
-
-
-
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "postgres";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "anon";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "authenticated";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "service_role";
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+CREATE TRIGGER trg_sys_handle_new_user AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION public.sys_handle_new_user();
 
 
