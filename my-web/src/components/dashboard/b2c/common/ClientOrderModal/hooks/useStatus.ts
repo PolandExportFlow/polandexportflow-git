@@ -15,6 +15,10 @@ function resolveLookup(ctxOrderId: string, explicit?: string): string {
     return String(raw || '').replace(/^#/, '').trim()
 }
 
+// ✅ NOWY, KOMPATYBILNY GENERATOR KRÓTKIEGO ID
+const generateShortId = (): string => Math.random().toString(36).substring(2, 5);
+
+
 export function useStatus() {
     const { orderId, refreshSoft } = useClientOrderModalCtx()
 
@@ -66,7 +70,8 @@ export function useStatus() {
 
         for (const file of files) {
             const cleanName = safeName(file.name)
-            const uniqueId = crypto.randomUUID()
+            // ✅ POPRAWKA: Użycie kompatybilnego generatora zamiast wadliwego crypto.randomUUID()
+            const uniqueId = generateShortId(); 
             const storage_path = `${orderData.order_number}/general/${uniqueId}__${cleanName}`
 
             // Atomic Upload przez Edge Function

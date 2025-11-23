@@ -342,7 +342,7 @@ export default function StatusPanel({
 
             <hr className='my-6 border-light-blue/50' />
 
-            <div className='mt-4 mb-4 bg-ds-light-blue rounded-md p-4'>
+            <div className className='mt-4 mb-4 bg-ds-light-blue rounded-md p-4'>
                 <div
                     onDrop={onDrop}
                     onDragOver={onDragOver}
@@ -369,7 +369,10 @@ export default function StatusPanel({
                             const fname = f.file_name || 'File'
                             const idStr = String(f.id ?? i)
                             const href = signedMap[idStr] || f.file_url || ''
+
+                            // 🛑 POPRAWKA LOGIKI WYŚWIETLANIA
                             const isImg = isPreviewableInline(f)
+                            // Ładujemy jeśli to obrazek ale nie mamy jeszcze URL
                             const loading = isLoadingId(f.id) || f.mime_type === 'pef/loading' || (isImg && !href)
 
                             return (
