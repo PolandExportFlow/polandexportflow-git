@@ -342,7 +342,7 @@ export default function StatusPanel({
 
             <hr className='my-6 border-light-blue/50' />
 
-            <div className className='mt-4 mb-4 bg-ds-light-blue rounded-md p-4'>
+            <div className='mt-4 mb-4 bg-ds-light-blue rounded-md p-4'>
                 <div
                     onDrop={onDrop}
                     onDragOver={onDragOver}
