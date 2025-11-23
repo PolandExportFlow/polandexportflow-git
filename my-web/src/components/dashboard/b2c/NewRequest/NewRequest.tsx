@@ -230,7 +230,6 @@ type UploadArgs = {
 async function uploadFileForItem({ itemId, orderNumber, itemNumber, file }: UploadArgs) {
     try {
         const cleanName = safeName(file.name)
-        // ✅ POPRAWIONA LINIA: Użycie kompatybilnego generatora zamiast crypto.randomUUID()
         const uniqueId = generateShortId(); 
         const storage_path = `${orderNumber}/items/${itemNumber}/${uniqueId}__${cleanName}`
 
