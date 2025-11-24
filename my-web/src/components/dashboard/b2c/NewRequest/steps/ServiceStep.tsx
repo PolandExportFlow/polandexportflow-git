@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useMemo, useRef, useState, useEffect } from 'react'
-import { PackagePlus, ChevronDown, CheckCircle2, Truck, ShoppingCart } from 'lucide-react'
+import { PackagePlus, ChevronDown, CheckCircle2, Truck, ShoppingCart, ExternalLink, AlertCircle } from 'lucide-react'
 import clsx from 'clsx'
 import UniversalStep from '../common/UniversalStep'
 import type { ServiceType } from '../requestTypes'
@@ -25,6 +25,7 @@ export default function ServiceStep({ value, onChange, onContinue, onBack }: Pro
         onChange?.(v)
     }
 
+    // Przycisk "Continue" pojawia się tylko, gdy coś jest wybrane
     const handleContinue = useMemo(() => (selected ? () => onContinue?.(selected) : undefined), [selected, onContinue])
 
     return (
@@ -34,8 +35,9 @@ export default function ServiceStep({ value, onChange, onContinue, onBack }: Pro
             onContinue={handleContinue}
             onBack={onBack}
             continueLabel='Continue'>
+            
             <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
-                {/* Karta 1: Parcel Forwarding (Bez zmian) */}
+                {/* Karta 1: Parcel Forwarding */}
                 <ServiceChoiceCard
                     value={'Parcel Forwarding'}
                     selected={selected}
@@ -63,14 +65,14 @@ export default function ServiceStep({ value, onChange, onContinue, onBack }: Pro
                     }}
                 />
 
-                {/* Karta 2: Assisted Purchase (Zmienione z Personal Shipping) */}
+                {/* Karta 2: Assisted Purchase */}
                 <ServiceChoiceCard
-                    value={'Assisted Purchase'} // ZMIANA 1: Zaktualizowana wartość
+                    value={'Assisted Purchase'}
                     selected={selected}
                     onSelect={handlePick}
                     Icon={ShoppingCart}
-                    title='Assisted Purchase (We Buy & Ship)' // ZMIANA 2: Nowy tytuł
-                    desc='You send product links — we buy in Poland and ship to you.' // ZMIANA 3: Nowy opis
+                    title='Assisted Purchase (We Buy & Ship)'
+                    desc='You send product links — we buy in Poland and ship to you.'
                     details={{
                         how: [
                             'You send us product links.',
@@ -92,16 +94,25 @@ export default function ServiceStep({ value, onChange, onContinue, onBack }: Pro
                 />
             </div>
 
+            {/* WALIDACJA: Wyświetlamy komunikat, jeśli nic nie wybrano */}
+            {!selected && (
+                <div className='mt-6 flex items-center justify-center gap-2 text-[13px] text-middle-blue/70 bg-middle-blue/5 border border-middle-blue/10 p-4 rounded-md animate-in fade-in duration-300'>
+                    <AlertCircle className='h-4 w-4 text-middle-blue' />
+                    <span>Please select a service type to continue.</span>
+                </div>
+            )}
+
             <div className='mt-8 text-center max-w-[1200px] mx-auto opacity-70 pb-4 md:pb-0'>
                 <p>
                     Need B2B support or a custom request? We also handle relocation of personal belongings, larger shipping
                     projects, and product sourcing. Learn more in our {' '}
                     <a
-                        href='https://polandexportflow.com/how-it-works'
-                        className='font-medium hover:text-dark-blue underline underline-offset-2'
+                        href='/how-it-works'
+                        className='inline-flex items-center gap-1 font-medium hover:text-dark-blue underline underline-offset-2'
                         target='_blank'
                         rel='noopener noreferrer'>
                         service overview
+                        <ExternalLink className='h-3 w-3' />
                     </a>
                     .
                 </p>
@@ -109,6 +120,8 @@ export default function ServiceStep({ value, onChange, onContinue, onBack }: Pro
         </UniversalStep>
     )
 }
+
+// --- Komponenty pomocnicze (bez zmian logiki, tylko style) ---
 
 function ServiceChoiceCard({
     value,

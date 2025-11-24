@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useMemo, useState, useCallback } from 'react'
-import { PackagePlus, MapPin, Tag, FileCheck } from 'lucide-react'
+import { PackagePlus, MapPin, Tag, FileCheck, Loader2 } from 'lucide-react'
 import RequestNav from './RequestNav'
 import RequestFooter from './RequestFooter'
 import ServiceStep from './steps/ServiceStep'
@@ -11,8 +11,10 @@ import SummaryStep from './steps/SummaryStep'
 import SuccessStep from './steps/SuccessStep'
 import { useCreateOrder } from './hooks/useCreateOrder'
 import { getCountryInfoByName, getAllCountries } from '@/utils/country/countryHelper'
-import type { ServiceType, AddressModel, OrderItemInput, CreateOrderArgs, CreateOrderResult } from './requestTypes'
+import type { ServiceType, AddressModel, OrderItemInput, CreateOrderArgs } from './requestTypes'
 import { supabase } from '@/utils/supabase/client'
+// Importujemy nasze nowe helpery
+import { toNumOrUndefined, toNumOrZero, toQty, isNonEmptyString } from '@/utils/newRequestFormHelper'
 
 export type StepKey = 'service' | 'address' | 'items' | 'summary'
 
@@ -23,40 +25,23 @@ const STEPS = [
     { key: 'summary', label: 'Summary', Icon: FileCheck },
 ] as const
 
-function numOrU(v: unknown): number | undefined {
-    if (v === null || v === undefined) return undefined
-    const s = String(v).trim()
-    if (s === '') return undefined
-    const n = Number(s.replace(',', '.'))
-    return Number.isFinite(n) ? n : undefined
-}
-function numOr0(v: unknown): number {
-    const n = numOrU(v)
-    return Number.isFinite(n as number) ? (n as number) : 0
-}
-function qty(v: unknown): number {
-    const s = String(v ?? '').replace(/[^\d]/g, '')
-    const n = s ? parseInt(s, 10) : 1
-    return Math.max(1, Number.isFinite(n) ? n : 1)
-}
-
+// Mapowanie itemu z UI na strukturę bazy danych przy użyciu helperów
 const mapItemToDB = (i: Item): OrderItemInput => ({
     item_name: (i.item_name || '').trim(),
     item_url: (i.item_url || '')?.trim() || null,
     item_note: (i.item_note || '')?.trim() || null,
-    item_quantity: qty(i.item_quantity),
-    item_value: numOr0(i.item_value),
-    item_weight: numOrU(i.item_weight) ?? null,
-    item_length: numOrU(i.item_length) ?? null,
-    item_width: numOrU(i.item_width) ?? null,
-    item_height: numOrU(i.item_height) ?? null,
+    item_quantity: toQty(i.item_quantity),
+    item_value: toNumOrZero(i.item_value),
+    item_weight: toNumOrUndefined(i.item_weight) ?? null,
+    item_length: toNumOrUndefined(i.item_length) ?? null,
+    item_width: toNumOrUndefined(i.item_width) ?? null,
+    item_height: toNumOrUndefined(i.item_height) ?? null,
 })
 
 const safeName = (n: string) => n.replace(/[^\w.\-]+/g, '_')
 
-// ✅ POPRAWKA: Nowa funkcja do generowania kompatybilnego, krótkiego ID
-const generateShortId = (): string => Math.random().toString(36).substring(2, 5);
-
+// TEGO NIE RUSZAMY - zgodnie z prośbą
+const generateShortId = (): string => Math.random().toString(36).substring(2, 5)
 
 function getItemIdFromDBItem(dbItem: any): string {
     if (dbItem?.item_id) return String(dbItem.item_id)
@@ -64,6 +49,18 @@ function getItemIdFromDBItem(dbItem: any): string {
 
     console.error('❌ Missing item id on createdOrder.items element:', dbItem)
     throw new Error('Created order item does not contain an ID.')
+}
+
+// --- Komponent Overlay (Loading Screen) ---
+function LoadingOverlay({ message }: { message: string }) {
+    return (
+        <div className='fixed inset-0 z-[999] flex flex-col items-center justify-center bg-white/60 backdrop-blur-[2px] animate-in fade-in duration-300'>
+            <div className='bg-white p-6 rounded-xl shadow-2xl border border-middle-blue/10 flex flex-col items-center gap-4'>
+                <Loader2 className='h-10 w-10 animate-spin text-middle-blue' />
+                <span className='text-middle-blue font-medium tracking-wide text-lg'>{message}</span>
+            </div>
+        </div>
+    )
 }
 
 export default function NewRequest() {
@@ -74,6 +71,7 @@ export default function NewRequest() {
         order_phone: '',
         order_country: '',
         order_city: '',
+        order_email: '',
         order_postal_code: '',
         order_street: '',
         order_house_number: '',
@@ -88,34 +86,39 @@ export default function NewRequest() {
     const [submittedOrder, setSubmittedOrder] = useState<string | null>(null)
 
     const countryOptions = useMemo(() => getAllCountries('en'), [])
+
+    // Logika walidacji kroków
     const isServiceDone = !!service
     const isAddressDone = useMemo(() => {
         const a = address
         return Boolean(a.order_fullname?.trim() && a.order_phone?.trim() && getCountryInfoByName(a.order_country))
     }, [address])
+    
     const isItemsDone = useMemo(
         () =>
             items.length > 0 &&
             items.every(
-                i => (i.item_name?.trim() || '').length > 0 && qty(i.item_quantity) >= 1 && (numOrU(i.item_value) ?? 0) > 0
+                i => isNonEmptyString(i.item_name) && toQty(i.item_quantity) >= 1 && toNumOrZero(i.item_value) > 0
             ),
         [items]
     )
+
     const maxReachableIndex = isServiceDone ? (isAddressDone ? (isItemsDone ? 3 : 2) : 1) : 0
 
     const next = () => setStep(prev => (prev === 'service' ? 'address' : prev === 'address' ? 'items' : 'summary'))
     const back = () => setStep(prev => (prev === 'summary' ? 'items' : prev === 'items' ? 'address' : 'service'))
     const onAddressChange = useCallback((patch: Partial<AddressModel>) => setAddress(s => ({ ...s, ...patch })), [])
     const onItemsChange = useCallback(setItems, [])
-    const canSubmit = isServiceDone && isAddressDone && isItemsDone && !isCreatingOrder && !isUploading
+
+    const isLoading = isCreatingOrder || isUploading
+    const canSubmit = isServiceDone && isAddressDone && isItemsDone && !isLoading
 
     const handleSubmit = async () => {
         if (!canSubmit || !service) return
-        let createdOrder: CreateOrderResult | null = null
         setUploadError(null)
 
         try {
-            // 1. Create Order
+            // 1. Create Order w bazie danych
             const dbItems: OrderItemInput[] = items.map(mapItemToDB)
             const payload: CreateOrderArgs = {
                 service,
@@ -124,37 +127,41 @@ export default function NewRequest() {
                 order_note: orderNote.trim() || null,
             }
 
-            createdOrder = await createOrder(payload)
+            const createdOrder = await createOrder(payload)
             if (!createdOrder || !createdOrder.items) throw new Error('Failed to create order, data missing.')
 
             const orderNumber = createdOrder.order_number
 
-            // 2. Upload Files
-            setUploading(true)
+            // 2. Upload plików (jeśli istnieją)
             const uiItemsWithFiles = items.map(i => ({ files: i.files || [] }))
-            const uploadPromises: Promise<void>[] = []
+            const hasFiles = uiItemsWithFiles.some(i => i.files.length > 0)
 
-            for (let i = 0; i < createdOrder.items.length; i++) {
-                const itemFromDB = createdOrder.items[i]
-                const itemId = getItemIdFromDBItem(itemFromDB)
-                const itemNumber = String(itemFromDB.item_number ?? i + 1)
+            if (hasFiles) {
+                setUploading(true)
+                const uploadPromises: Promise<void>[] = []
 
-                const files = uiItemsWithFiles[i]?.files || []
-                for (const file of files) {
-                    uploadPromises.push(
-                        uploadFileForItem({
-                            itemId,
-                            orderNumber,
-                            itemNumber,
-                            file,
-                        })
-                    )
+                for (let i = 0; i < createdOrder.items.length; i++) {
+                    const itemFromDB = createdOrder.items[i]
+                    const itemId = getItemIdFromDBItem(itemFromDB)
+                    const itemNumber = String(itemFromDB.item_number ?? i + 1)
+
+                    const files = uiItemsWithFiles[i]?.files || []
+                    for (const file of files) {
+                        uploadPromises.push(
+                            uploadFileForItem({
+                                itemId,
+                                orderNumber,
+                                itemNumber,
+                                file,
+                            })
+                        )
+                    }
                 }
+
+                await Promise.all(uploadPromises)
+                setUploading(false)
             }
 
-            await Promise.all(uploadPromises)
-
-            setUploading(false)
             setSubmittedOrder(orderNumber)
         } catch (err: any) {
             setUploading(false)
@@ -164,7 +171,12 @@ export default function NewRequest() {
     }
 
     return (
-        <section className='section mt-[80px] lg:mt-[130px] bg-light-blue'>
+        <section className='section mt-[80px] lg:mt-[130px] bg-light-blue relative min-h-[600px]'>
+            {/* Loading Overlay - pojawia się na całym ekranie sekcji */}
+            {isLoading && (
+                <LoadingOverlay message={isCreatingOrder ? 'Creating your order...' : 'Uploading attachments...'} />
+            )}
+
             <div className='wrapper w-full max-w-[1100px] mx-auto'>
                 {!submittedOrder && (
                     <RequestNav
@@ -172,7 +184,8 @@ export default function NewRequest() {
                         activeKey={step}
                         maxReachableIndex={maxReachableIndex}
                         onStepClick={(idx, key) => {
-                            if (!isCreatingOrder && !isUploading && idx <= maxReachableIndex) setStep(key as StepKey)
+                            // Blokujemy nawigację podczas ładowania
+                            if (!isLoading && idx <= maxReachableIndex) setStep(key as StepKey)
                         }}
                     />
                 )}
@@ -181,7 +194,13 @@ export default function NewRequest() {
                         <SuccessStep orderNumber={submittedOrder} />
                     ) : (
                         <>
-                            {step === 'service' && <ServiceStep value={service} onChange={setService} onContinue={next} />}
+                            {step === 'service' && (
+                                <ServiceStep 
+                                    value={service} 
+                                    onChange={setService} 
+                                    onContinue={next} 
+                                />
+                            )}
                             {step === 'address' && (
                                 <AddressStep
                                     address={address}
@@ -192,7 +211,12 @@ export default function NewRequest() {
                                 />
                             )}
                             {step === 'items' && (
-                                <ItemsStep items={items} onItemsChange={onItemsChange} onBack={back} onContinue={next} />
+                                <ItemsStep 
+                                    items={items} 
+                                    onItemsChange={onItemsChange} 
+                                    onBack={back} 
+                                    onContinue={next} 
+                                />
                             )}
                             {step === 'summary' && (
                                 <SummaryStep
@@ -211,7 +235,9 @@ export default function NewRequest() {
                     )}
                 </div>
                 {(createOrderError || uploadError) && (
-                    <div className='mt-4 text-[13px] text-red'>{String(createOrderError || uploadError)}</div>
+                    <div className='mt-4 text-[13px] text-red font-medium text-center bg-red/5 p-3 rounded-md border border-red/20'>
+                        Something went wrong: {String(createOrderError || uploadError)}
+                    </div>
                 )}
                 <RequestFooter />
             </div>
@@ -219,7 +245,7 @@ export default function NewRequest() {
     )
 }
 
-// --- UPLOAD FUNKCJA ---
+// --- UPLOAD HELPER FUNCTION ---
 type UploadArgs = {
     itemId: string
     orderNumber: string
@@ -230,7 +256,7 @@ type UploadArgs = {
 async function uploadFileForItem({ itemId, orderNumber, itemNumber, file }: UploadArgs) {
     try {
         const cleanName = safeName(file.name)
-        const uniqueId = generateShortId(); 
+        const uniqueId = generateShortId()
         const storage_path = `${orderNumber}/items/${itemNumber}/${uniqueId}__${cleanName}`
 
         const { data: genData, error: genError } = await supabase.functions.invoke(
@@ -246,7 +272,7 @@ async function uploadFileForItem({ itemId, orderNumber, itemNumber, file }: Uplo
         )
 
         if (genError) {
-            console.error('❌ BŁĄD SUPABASE INVOKE:', genError)
+            console.error('❌ SUPABASE INVOKE ERROR:', genError)
             throw new Error(`Generate URL failed: ${JSON.stringify(genError)}`)
         }
 
@@ -259,7 +285,7 @@ async function uploadFileForItem({ itemId, orderNumber, itemNumber, file }: Uplo
         const { presignedUrl } = genData as { presignedUrl: string }
 
         if (!presignedUrl) {
-            throw new Error('Invalid data from user_order_item_file_upload_generate_url (brak URL)')
+            throw new Error('Invalid data from user_order_item_file_upload_generate_url (missing URL)')
         }
 
         const uploadResponse = await fetch(presignedUrl, {

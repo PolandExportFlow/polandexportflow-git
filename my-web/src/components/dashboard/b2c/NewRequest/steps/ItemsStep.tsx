@@ -17,6 +17,7 @@ import {
 	Trash2,
 	PackagePlus,
 	AlertTriangle,
+	AlertCircle,
 } from 'lucide-react'
 import clsx from 'clsx'
 import UniversalStep from '../common/UniversalStep'
@@ -25,6 +26,8 @@ import UniversalImageModal from '@/components/ui/UniversalImageModal'
 import UniversalConfirmModal from '@/components/ui/UniversalConfirmModal'
 import { ensurePreviewableImages } from '@/utils/convertImages'
 import UniversalInput from '@/components/ui/UniwersalInput'
+// Import helperów
+import { toQtyString, toQty, hasPositiveValue, isNonEmptyString } from '@/utils/newRequestFormHelper'
 
 export type Item = {
 	id: string
@@ -41,7 +44,7 @@ export type Item = {
 	files: File[]
 }
 
-/** nowy wiersz */
+/** Tworzy pusty wiersz przedmiotu */
 export const newItem = (): Item => ({
 	id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 	expanded: false,
@@ -56,29 +59,6 @@ export const newItem = (): Item => ({
 	item_height: '',
 	files: [],
 })
-
-/* ===== helpers ===== */
-function sanitizeQty(v: any): string {
-	const raw = String(v ?? '').replace(/[^\d]/g, '')
-	const n = raw === '' ? 1 : parseInt(raw, 10) || 1
-	return String(Math.max(1, n))
-}
-
-/** MUSI być > 0 */
-function hasPosMoney(v: string | undefined | null): boolean {
-	if (v == null) return false
-	const s = String(v).trim()
-	if (!s) return false
-	const n = Number(s.replace(',', '.'))
-	return Number.isFinite(n) && n > 0
-}
-
-// ⭐️ NOWY HELPER: Sprawdza, czy link jest poprawny (niepusty)
-function hasLink(v: string | undefined | null): boolean {
-	if (v == null) return false
-	const s = String(v).trim()
-	return s.length > 0
-}
 
 export default function ItemsStep({
 	items,
@@ -97,16 +77,16 @@ export default function ItemsStep({
 	const removeItem = (id: string) => onItemsChange(items.filter(i => i.id !== id))
 	const addItem = () => onItemsChange([...items, newItem()])
 
-	// ⭐️ POPRAWKA: Dodano walidację 'hasLink(i.item_url)'
+	// Walidacja: Sprawdzamy, czy każdy przedmiot ma nazwę, link, cenę > 0 i ilość >= 1
 	const canContinue = useMemo(
 		() =>
 			items.length > 0 &&
 			items.every(
 				i =>
-					i.item_name.trim().length > 0 &&
-					hasPosMoney(i.item_value) &&
-					hasLink(i.item_url) &&
-					Number(sanitizeQty(i.item_quantity)) >= 1
+					isNonEmptyString(i.item_name) &&
+					hasPositiveValue(i.item_value) &&
+					isNonEmptyString(i.item_url) &&
+					toQty(i.item_quantity) >= 1
 			),
 		[items]
 	)
@@ -130,23 +110,39 @@ export default function ItemsStep({
 						onToggle={() => updateItem(it.id, { expanded: !it.expanded })}
 					/>
 				))}
+
 				<div className='py-4 text-right mx-auto opacity-70'>
 					<p className='flex items-center justify-end gap-2 px-3'>
 						<AlertTriangle className='w-4 h-4 text-dark-blue' />
-						<a href='/prohibited-items' className='font-medium hover:text-dark-blue underline underline-offset-2'>
+						<a
+							href='/prohibited-items'
+							target='_blank'
+							rel='noopener noreferrer'
+							className='font-medium hover:text-dark-blue underline underline-offset-2'>
 							List of items we cannot ship
 						</a>
 					</p>
 				</div>
 			</div>
 
+			{/* Przycisk Add Product - zmieniony kolor z zielonego na ciemnoniebieski */}
 			<button
 				type='button'
 				onClick={addItem}
-				className='inline-flex items-center justify-center gap-2 rounded-md border border-green/25 bg-green py-4 md:py-5 text-[12px] md:text-[13px] w-full text-white hover:bg-green/75 transition font-made_light tracking-wide mb-2'>
+				className='inline-flex items-center justify-center gap-2 rounded-md   bg-middle-blue py-4 md:py-5 text-[12px] md:text-[13px] w-full text-white hover:bg-green transition-colors duration-300 font-made_light tracking-wide mb-2'>
 				<PackagePlus className='h-4.5 w-4.5' />
-				<span>Add Product</span>
+				<span>Add Another Product</span>
 			</button>
+
+			{/* Walidacja - komunikat blokujący przejście dalej */}
+			{!canContinue && (
+				<div className='mt-4 flex items-center justify-center gap-2 text-[13px] text-middle-blue/70 bg-middle-blue/5 border border-middle-blue/10 p-4 rounded-md animate-in fade-in'>
+					<AlertCircle className='h-4 w-4 text-middle-blue' />
+					<span>
+						Please ensure all items have a <b>Product name</b>, <b>Price</b>, and <b>Link</b> (if no link, type "N/A" or a dot).
+					</span>
+				</div>
+			)}
 		</UniversalStep>
 	)
 }
@@ -165,7 +161,8 @@ function ProductCard({
 	onToggle: () => void
 }) {
 	const set = (k: keyof Item) => (v: any) => onChange({ [k]: v })
-	const setQty = (val: any) => onChange({ item_quantity: sanitizeQty(val) })
+	// Użycie helpera doQtyString
+	const setQty = (val: any) => onChange({ item_quantity: toQtyString(val) })
 
 	const quickFileInputRef = useRef<HTMLInputElement>(null)
 	const [isDragging, setIsDragging] = useState(false)
@@ -245,7 +242,6 @@ function ProductCard({
 					leftIcon={Package}
 				/>
 
-				{/* ⭐️ POPRAWKA: Usunięto '(optional)' i dodano 'required' */}
 				<UniversalInput
 					label='Product link'
 					name={`item_url-${item.id}`}
@@ -268,11 +264,12 @@ function ProductCard({
 						required
 						inputMode='decimal'
 						step='0.01'
-						min='0.01' // > 0 twardo
+						min='0.01'
 						suffix='PLN'
 						leftIcon={Coins}
 					/>
 
+					{/* Quick Image Upload Zone */}
 					<div className='flex flex-col mt-4'>
 						<label className='block mb-2 ml-0.5 font-medium text-dark-blue'>
 							<span className='inline-flex items-center gap-2'>
@@ -315,6 +312,7 @@ function ProductCard({
 				</div>
 			</div>
 
+			{/* Thumbnails */}
 			{thumbUrls.length > 0 && (
 				<div className='mt-3'>
 					<div className='flex flex-wrap gap-2 overflow-visible'>

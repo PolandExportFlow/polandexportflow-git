@@ -12,6 +12,7 @@ export interface AddressModel {
   order_phone: string
   order_country: string 
   order_city: string
+  order_email: string
   order_postal_code: string
   order_street: string
   order_house_number?: string | null
