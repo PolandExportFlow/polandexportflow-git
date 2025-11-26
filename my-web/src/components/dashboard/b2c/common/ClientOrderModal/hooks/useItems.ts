@@ -8,10 +8,12 @@ import { ensurePreviewableImages, DEFAULTS as IMG_DEFAULTS } from '@/utils/conve
 
 // --- Helpers ---
 const isUUID = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
-// ✅ Helper do wykrywania tymczasowego ID
 const isTempId = (v: string) => String(v).startsWith('tmp-') || String(v).startsWith('CREATING-')
 
-const tmpId = () => `tmp-${Math.random().toString(36).slice(2)}`
+// ✅ FIX: Bezpieczniejszy generator ID, który działa wszędzie
+const safeRandomId = () => Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
+
+const tmpId = () => `tmp-${safeRandomId()}`
 const safeName = (n: string) => n.replace(/[^\w.\-]+/g, '_')
 
 async function readError(res: Response): Promise<string> {
@@ -34,7 +36,6 @@ export function useItems() {
     const addItem = useCallback(
         async (patch: Partial<ItemsPanelRowDB> = {}) => {
             if (!orderId) throw new Error('Add failed: missing orderId')
-            // ✅ FIX: Używamy oczyszczonego lookupu (bez #)
             const lookup = resolveLookup(orderId)
 
             const tid = `CREATING-${tmpId()}`
@@ -61,7 +62,6 @@ export function useItems() {
                 const res = await fetch('/api/rpc/user_order_item_add', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    // ✅ Używamy oczyszczonego lookupu
                     body: JSON.stringify({ p_lookup: lookup, p_patch: patch }),
                 })
                 if (!res.ok) {
@@ -139,7 +139,6 @@ export function useItems() {
             
             updateLocalItem?.(itemId, { ...(prev || {}), ...patch })
 
-            // 🛑 Jeśli to ID tymczasowe, nie wysyłamy do API
             if (isTempId(itemId)) {
                 return
             }
@@ -175,11 +174,10 @@ export function useItems() {
     const addImages = useCallback(
         async (itemId: string, rawFiles: File[]) => {
             if (!orderId) throw new Error('Add images failed: missing orderId')
-            const lookup = resolveLookup(orderId) // ✅ Clean lookup
+            const lookup = resolveLookup(orderId)
 
             if (!rawFiles?.length) return
 
-            // Nie można dodawać zdjęć do tymczasowego itemu
             if (isTempId(itemId)) {
                  console.warn('Cannot upload images to a temporary item. Wait for sync.')
                  return
@@ -197,7 +195,8 @@ export function useItems() {
             }
 
             const optimisticFiles = filesToUpload.map(file => ({
-                id: `temp-${crypto.randomUUID()}`,
+                // ✅ FIX: Używamy bezpiecznego generatora ID
+                id: `temp-${safeRandomId()}`,
                 file_name: file.name,
                 mime_type: file.type,
                 file_size: file.size,
@@ -210,11 +209,10 @@ export function useItems() {
             updateLocalItem?.(itemId, { files: [...prevFiles, ...optimisticFiles] })
 
             try {
-                // 3. Upload
                 for (const file of filesToUpload) {
                     const cleanName = safeName(file.name)
-                    const uniqueId = crypto.randomUUID()
-                    // Używamy lookup (bez #) w ścieżce
+                    // ✅ FIX: Używamy bezpiecznego generatora ID również tutaj
+                    const uniqueId = safeRandomId()
                     const storage_path = `${lookup}/items/${itemNumber}/${uniqueId}__${cleanName}`
 
                     const { data: genData, error: genError } = await supabase.functions.invoke(
@@ -241,7 +239,7 @@ export function useItems() {
                 await refreshSoft?.()
             } catch (e) {
                 console.error(e)
-                updateLocalItem?.(itemId, { files: prevFiles }) // Revert on error
+                updateLocalItem?.(itemId, { files: prevFiles }) // Revert
                 throw e
             }
         },
@@ -251,7 +249,7 @@ export function useItems() {
     const removeImages = useCallback(
         async (itemId: string, imageIds: string[]) => {
             if (!orderId) throw new Error('Remove images failed: missing orderId')
-            const lookup = resolveLookup(orderId) // ✅ Clean lookup
+            const lookup = resolveLookup(orderId)
             if (!imageIds?.length) return
 
             await Promise.all(imageIds.map(async (id) => {
