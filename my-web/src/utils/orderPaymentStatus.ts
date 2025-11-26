@@ -41,7 +41,7 @@ const CONFIGS: Record<OrderPaymentStatus, PaymentStatusConfig> = {
 		bgColor: '#FFE4E6',
 		textColor: '#9F1239',
 		icon: XCircle,
-		text: 'Cancelled',
+		text: 'Cancelled/Refunded',
 		progress: 0,
 	},
 }

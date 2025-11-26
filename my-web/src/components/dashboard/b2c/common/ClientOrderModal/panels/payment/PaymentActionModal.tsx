@@ -3,7 +3,7 @@
 import React, { useMemo } from 'react'
 import Modal from '@/components/ui/Modal'
 import { getLogo } from '@/utils/getLogo'
-import { CreditCard, Copy, Mail, Banknote, Shield } from 'lucide-react'
+import { CreditCard, Copy, Mail, Banknote } from 'lucide-react'
 import type { MethodCode, Currency } from '../../clientOrderTypes'
 
 type Props = {
@@ -63,7 +63,6 @@ const METHOD_META: Record<
     },
 }
 
-// ZMIANA: Lista logo dla Stripe
 const STRIPE_HEADER_LOGOS = [
     getLogo('payment', 'visa'),
     getLogo('payment', 'mastercard'),
@@ -71,12 +70,10 @@ const STRIPE_HEADER_LOGOS = [
     getLogo('payment', 'applepay'),
 ].filter(Boolean) as string[]
 
-// ZMIANA: Zwiększone domyślne rozmiary logo (ZWIĘKSZONO DO 28PX WYSOKOŚCI)
-const HEADER_LOGO_HEIGHT = 28; // Zwiększono
-const HEADER_LOGO_MAX_WIDTH = 60; // Zwiększono
+const HEADER_LOGO_HEIGHT = 28
+const HEADER_LOGO_MAX_WIDTH = 60
 
-
-export default function CheckoutPaymentModal({
+export default function PaymentActionModal({
     isOpen,
     onClose,
     orderNumber,
@@ -102,7 +99,6 @@ export default function CheckoutPaymentModal({
     const logo = getLogo('payment', methodKey) || ''
     const copy = (txt: string) => navigator.clipboard.writeText(String(txt)).catch(() => {})
 
-    // ZMIANA: Definicja akcji dla nagłówka
     const headerActions = useMemo(() => {
         if (isStripeGroupMethod) {
             return (
@@ -120,7 +116,6 @@ export default function CheckoutPaymentModal({
                 </div>
             )
         }
-        // W przypadku PayPal/Revolut, używamy jednego logo
         return logo ? ( 
             <img
                 src={logo}
@@ -131,8 +126,8 @@ export default function CheckoutPaymentModal({
             />
         ) : (
             <span className='block' style={{ height: 20, width: 110 }} />
-        );
-    }, [isStripeGroupMethod, logo, meta.title]);
+        )
+    }, [isStripeGroupMethod, logo, meta.title])
 
 
     return (
@@ -140,39 +135,39 @@ export default function CheckoutPaymentModal({
             isOpen={isOpen}
             onClose={onClose}
             size='md'
-            panelMaxWidth='720px'
+            panelMaxWidth='600px' // Zmniejszyłem lekko max-width dla lepszych proporcji
             title={
-                <span className='flex items-center gap-2'>
-                    <CreditCard className='h-5 w-5' /> Payment — {meta.title}
+                <span className='flex items-center gap-2 tracking-wide'>
+                    <CreditCard className='h-5 w-5 text-middle-blue' /> 
+                    Payment <span className='opacity-50'>—</span> {meta.title}
                 </span>
             }
         >
-            <div className='rounded-md bg-white border border-middle-blue/20 overflow-hidden'>
+            <div className='rounded-xl bg-white border border-middle-blue/15 overflow-hidden shadow-sm'>
                 {/* HEADER WEWNĘTRZNEGO BODY MODALA */}
-                <div className='flex items-center justify-between px-5 py-4 sm:px-6 sm:py-5'>
-                    <div className='flex items-center gap-2 text-middle-blue/70 text-[13px]'>
+                <div className='flex items-center justify-between px-5 py-4 sm:px-6 sm:py-5 bg-gray-50/50'>
+                    <div className='flex items-center gap-2 text-middle-blue/80 text-[14px] font-medium'>
                         {meta.icon} <span>{meta.title}</span>
                     </div>
                     
-                    {/* Logika wyświetlania logo w wewnętrznym nagłówku BODY */}
                     {headerActions}
-
                 </div>
+                
                 <div className='h-px bg-middle-blue/10' />
 
                 {/* BODY */}
-                <div className='px-5 py-5 sm:px-6 sm:py-6 space-y-5'>
+                <div className='px-5 py-6 sm:px-6 sm:py-7 space-y-6'>
                     {/* Recipient / Processor */}
                     <div className='space-y-2'>
-                        <div className='text-[12px] text-middle-blue/70'>{meta.primaryLabel}</div>
-                        <div className='flex items-center justify-between gap-2'>
+                        <div className='text-[12px] text-middle-blue/60 uppercase tracking-wider font-medium'>{meta.primaryLabel}</div>
+                        <div className='flex items-center justify-between gap-3 p-3 rounded-lg bg-ds-light-blue border border-middle-blue/10'>
                             <span className='text-[14px] font-heebo_medium text-middle-blue break-all'>
                                 {meta.primaryValue}
                             </span>
                             {meta.primaryValue && !isStripeGroupMethod && ( 
                                 <button
                                     onClick={() => copy(meta.primaryValue)}
-                                    className='p-1.5 rounded-md hover:bg-middle-blue/10 text-middle-blue transition-colors'
+                                    className='p-2 rounded-md hover:bg-white text-middle-blue transition-all shadow-sm hover:shadow'
                                     title='Copy'
                                     aria-label='Copy recipient'
                                 >
@@ -185,14 +180,14 @@ export default function CheckoutPaymentModal({
                     {/* Title (tylko dla metod z instrukcją) */}
                     {!isStripeGroupMethod && (
                         <div className='space-y-2'>
-                            <div className='text-[12px] text-middle-blue/70'>Payment title</div>
-                            <div className='flex items-center justify-between gap-2'>
+                            <div className='text-[12px] text-middle-blue/60 uppercase tracking-wider font-medium'>Payment title</div>
+                            <div className='flex items-center justify-between gap-3 p-3 rounded-lg bg-ds-light-blue border border-middle-blue/10'>
                                 <span className='text-[14px] font-heebo_medium text-middle-blue whitespace-nowrap'>
                                     Order {orderNumber}
                                 </span>
                                 <button
                                     onClick={() => copy(`Order ${orderNumber}`)}
-                                    className='p-1.5 rounded-md hover:bg-middle-blue/10 text-middle-blue transition-colors'
+                                    className='p-2 rounded-md hover:bg-white text-middle-blue transition-all shadow-sm hover:shadow'
                                     title='Copy'
                                     aria-label='Copy payment title'
                                 >
@@ -205,43 +200,39 @@ export default function CheckoutPaymentModal({
                     {/* Additional info */}
                     {meta.secondary && (
                         <div className='space-y-2'>
-                            <div className='text-[12px] text-middle-blue/70'>Additional information</div>
-                            <div className='text-[14px] font-heebo_medium text-middle-blue break-words leading-snug'>
+                            <div className='text-[12px] text-middle-blue/60 uppercase tracking-wider font-medium'>Information</div>
+                            <div className='text-[14px] text-middle-blue/80 break-words leading-relaxed'>
                                 {meta.secondary}
                             </div>
                         </div>
                     )}
 
                     {/* Amount */}
-                    <div className='flex items-center justify-between pt-3'>
-                        <div className='text-[13px] text-middle-blue/70'>Amount due</div>
-                        <div className='text-middle-blue font-heebo_medium text-[18px] tabular-nums'>{amountLabel}</div>
+                    <div className='flex items-center justify-between pt-2'>
+                        <div className='text-[14px] text-middle-blue/70 font-medium'>Amount due</div>
+                        <div className='text-middle-blue font-heebo_medium text-[22px] tabular-nums tracking-tight'>{amountLabel}</div>
                     </div>
 
-                    {/* Button */}
+                    {/* Button - STYL PREMIUM (jak w StatusPanel) */}
                     <button
                         type='button'
-                        onClick={handlePayAction} 
+                        onClick={handlePayAction}
                         disabled={!Number.isFinite(amount) || amount <= 0}
-                        className='w-full h-[56px] rounded-lg bg-middle-blue text-white flex items-center justify-center gap-2
-                        hover:bg-middle-blue/90 active:scale-[.99] focus:outline-none focus:ring-2 focus:ring-middle-blue/40 transition-all disabled:opacity-60'
+                        className='w-full flex items-center justify-center gap-3 rounded-xl bg-middle-blue text-white h-[54px] text-[15px] font-medium shadow-lg shadow-middle-blue/20 hover:bg-middle-blue/90 hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-60 disabled:hover:transform-none'
                     >
                         <CreditCard className='w-5 h-5' />
-                        <span className='text-[15px] tracking-wide'>
+                        <span>
                             {isStripeGroupMethod ? 'Go to Payment' : 'Pay now'}
                         </span>
                     </button>
 
                     {/* Footer note */}
-                    <div className='text-[12px] text-middle-blue/60 text-center leading-snug'>
+                    <div className='text-[12px] text-middle-blue/50 text-center leading-snug px-4'>
                         {isStripeGroupMethod ? (
-                            <>
-                                You will be redirected to the secure payment page.
-                            </>
+                            <>You will be redirected to the secure payment page.</>
                         ) : (
                             <>
                                 After sending the payment, please keep the confirmation.
-                                <br />
                                 <br />
                                 If you contact support, include “Order {orderNumber}”.
                             </>

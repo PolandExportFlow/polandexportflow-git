@@ -4,39 +4,27 @@ import { useCallback } from 'react'
 import { useClientOrderModalCtx } from '../ClientOrderModal.ctx'
 import type { ItemsPanelRowDB, ClientFile } from '../clientOrderTypes'
 import { supabase } from '@/utils/supabase/client'
+import { ensurePreviewableImages, DEFAULTS as IMG_DEFAULTS } from '@/utils/convertImages'
 
 // --- Helpers ---
 const isUUID = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
-const isTempId = (v: string) => /^tmp-|^CREATING-/i.test(v)
-const tmpId = () =>
-    `tmp-${
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-            ? (crypto as any).randomUUID()
-            : Math.random().toString(36).slice(2)
-    }`
+// ✅ Helper do wykrywania tymczasowego ID
+const isTempId = (v: string) => String(v).startsWith('tmp-') || String(v).startsWith('CREATING-')
 
+const tmpId = () => `tmp-${Math.random().toString(36).slice(2)}`
 const safeName = (n: string) => n.replace(/[^\w.\-]+/g, '_')
 
 async function readError(res: Response): Promise<string> {
     try {
         const j = await res.json()
         return j?.error || j?.message || JSON.stringify(j)
-    } catch {
-        try {
-            return await res.text()
-        } catch {
-            return ''
-        }
-    }
+    } catch { return await res.text().catch(() => '') }
 }
 
 function resolveLookup(ctxOrderId: string, explicit?: string): string {
     const raw = explicit ?? ctxOrderId ?? ''
-    return String(raw || '')
-        .replace(/^#/, '')
-        .trim()
+    return String(raw || '').replace(/^#/, '').trim()
 }
-// --- Koniec Helpers ---
 
 export function useItems() {
     const { data, orderId, addLocalItem, replaceLocalItem, updateLocalItem, removeLocalItem, refreshSoft } = useClientOrderModalCtx()
@@ -44,9 +32,10 @@ export function useItems() {
     const getItemById = (itemId: string) => (data?.itemsPanel ?? []).find(i => String(i.id) === String(itemId))
 
     const addItem = useCallback(
-        async (lookupMaybe?: string, patch: Partial<ItemsPanelRowDB> = {}) => {
-            const lookup = resolveLookup(orderId, lookupMaybe)
-            if (!lookup) throw new Error('Add failed: missing lookup (orderId/order_number)')
+        async (patch: Partial<ItemsPanelRowDB> = {}) => {
+            if (!orderId) throw new Error('Add failed: missing orderId')
+            // ✅ FIX: Używamy oczyszczonego lookupu (bez #)
+            const lookup = resolveLookup(orderId)
 
             const tid = `CREATING-${tmpId()}`
             const newItemSkeleton: ItemsPanelRowDB = {
@@ -65,12 +54,14 @@ export function useItems() {
                 created_at: new Date().toISOString(),
                 files: [],
             } as ItemsPanelRowDB
+            
             addLocalItem?.(newItemSkeleton)
 
             try {
                 const res = await fetch('/api/rpc/user_order_item_add', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    // ✅ Używamy oczyszczonego lookupu
                     body: JSON.stringify({ p_lookup: lookup, p_patch: patch }),
                 })
                 if (!res.ok) {
@@ -95,10 +86,9 @@ export function useItems() {
     )
 
     const deleteItem = useCallback(
-        async (lookupMaybe: string | undefined, itemId: string) => {
-            const lookup = resolveLookup(orderId, lookupMaybe)
-            if (!lookup) throw new Error('Delete failed: missing lookup')
-
+        async (itemId: string) => {
+            if (!orderId) throw new Error('Delete failed: missing orderId')
+            const lookup = resolveLookup(orderId)
             const id = String(itemId)
 
             if (isTempId(id)) {
@@ -107,25 +97,20 @@ export function useItems() {
             }
             if (!isUUID(id)) throw new Error('Cannot delete: item_id is not UUID')
 
-            const itemToDelete = (data?.itemsPanel ?? []).find(r => String(r.id) === id)
+            const itemToDelete = getItemById(id)
             const filesList = itemToDelete?.files || []
             const backup = itemToDelete
             
             removeLocalItem?.(id)
 
             try {
-                // 1. Usuń pliki z R2 (Edge Function)
                 if (filesList.length > 0) {
                     await Promise.all(filesList.map(async (f: any) => {
                         if (!f.id) return
-                        const { error } = await supabase.functions.invoke('user_order_item_file_delete', {
-                            body: { file_id: f.id } // 🛑 file_id
-                        })
-                        if (error) console.warn(`Failed to clean up file from R2 (File ID: ${f.id})`, error)
+                        await supabase.functions.invoke('user_order_item_file_delete', { body: { file_id: f.id } })
                     }))
                 }
 
-                // 2. Usuń item z bazy
                 const res = await fetch('/api/rpc/user_order_item_delete', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -133,67 +118,85 @@ export function useItems() {
                 })
                 if (!res.ok) {
                     const msg = await readError(res)
-                    throw new Error(`Delete failed (${res.status})${msg ? `: ${msg}` : ''}`)
+                    throw new Error(`Delete failed: ${msg}`)
                 }
             } catch (e) {
                 if (backup) addLocalItem?.(backup)
                 throw e
             }
         },
-        [orderId, removeLocalItem, addLocalItem, data]
+        [orderId, removeLocalItem, addLocalItem, getItemById]
     )
 
     const updateItem = useCallback(
-        async (lookupMaybe: string | undefined, itemId: string, patch: Partial<ItemsPanelRowDB>) => {
-            const lookup = resolveLookup(orderId, lookupMaybe)
-            if (!lookup) throw new Error('Update failed: missing lookup')
+        async (itemId: string, patch: Partial<ItemsPanelRowDB>) => {
+            if (!orderId) throw new Error('Update failed: missing orderId')
+            const lookup = resolveLookup(orderId)
+            
             if (Object.keys(patch).length === 0) return
 
-            const prev = (data?.itemsPanel ?? []).find(r => String(r.id) === String(itemId))
+            const prev = getItemById(itemId)
+            
             updateLocalItem?.(itemId, { ...(prev || {}), ...patch })
 
-            const payload = { p_lookup: lookup, p_item_id: itemId, p_patch: patch }
+            // 🛑 Jeśli to ID tymczasowe, nie wysyłamy do API
+            if (isTempId(itemId)) {
+                return
+            }
+
+            if (!isUUID(itemId)) {
+                 console.warn('Skipping update for non-UUID item:', itemId)
+                 return
+            }
 
             try {
                 const res = await fetch('/api/rpc/user_order_item_update', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
+                    body: JSON.stringify({ p_lookup: lookup, p_item_id: itemId, p_patch: patch }),
                 })
                 if (!res.ok) {
                     const msg = await readError(res)
-                    throw new Error(`Update failed (${res.status})${msg ? `: ${msg}` : ''}`)
+                    throw new Error(`Update failed: ${msg}`)
                 }
-
+                
                 const j = await res.json().catch(() => null)
                 const fresh = (j?.item ?? j?.data?.item) as ItemsPanelRowDB | undefined
-
                 if (fresh?.id) updateLocalItem?.(itemId, fresh)
-                else throw new Error('Update failed: Server did not return the updated item.')
+
             } catch (e) {
                 if (prev) updateLocalItem?.(itemId, prev)
                 throw e
             }
         },
-        [orderId, updateLocalItem, data]
+        [orderId, updateLocalItem, getItemById]
     )
 
     const addImages = useCallback(
-        async (
-            lookupMaybe: string | undefined,
-            itemId: string,
-            files: File[]
-        ) => {
-            const lookup = resolveLookup(orderId, lookupMaybe)
-            if (!lookup) throw new Error('Add images failed: missing lookup')
-            if (!files?.length) return
+        async (itemId: string, rawFiles: File[]) => {
+            if (!orderId) throw new Error('Add images failed: missing orderId')
+            const lookup = resolveLookup(orderId) // ✅ Clean lookup
+
+            if (!rawFiles?.length) return
+
+            // Nie można dodawać zdjęć do tymczasowego itemu
+            if (isTempId(itemId)) {
+                 console.warn('Cannot upload images to a temporary item. Wait for sync.')
+                 return
+            }
 
             const currentItem = getItemById(itemId)
             const itemNumber = currentItem?.item_number
-            if (!itemNumber) throw new Error('Cannot upload: Item not saved or missing item_number')
+            if (!itemNumber) throw new Error('Cannot upload: Item missing item_number')
 
-            // 1. Optimistic UI
-            const optimisticFiles = Array.from(files).map(file => ({
+            let filesToUpload = rawFiles
+            try {
+                filesToUpload = await ensurePreviewableImages(rawFiles, IMG_DEFAULTS)
+            } catch (e) {
+                console.warn('Image optimization failed', e)
+            }
+
+            const optimisticFiles = filesToUpload.map(file => ({
                 id: `temp-${crypto.randomUUID()}`,
                 file_name: file.name,
                 mime_type: file.type,
@@ -204,15 +207,14 @@ export function useItems() {
             })) as unknown as ClientFile[]
 
             const prevFiles = currentItem.files || []
-            updateLocalItem?.(itemId, {
-                files: [...prevFiles, ...optimisticFiles]
-            })
+            updateLocalItem?.(itemId, { files: [...prevFiles, ...optimisticFiles] })
 
             try {
-                // 2. Upload (Atomic - przez Edge Function)
-                for (const file of files) {
+                // 3. Upload
+                for (const file of filesToUpload) {
                     const cleanName = safeName(file.name)
                     const uniqueId = crypto.randomUUID()
+                    // Używamy lookup (bez #) w ścieżce
                     const storage_path = `${lookup}/items/${itemNumber}/${uniqueId}__${cleanName}`
 
                     const { data: genData, error: genError } = await supabase.functions.invoke(
@@ -227,71 +229,65 @@ export function useItems() {
                         }
                     )
 
-                    if (genError || !genData?.presignedUrl) {
-                        console.error('Upload URL Error:', genError)
-                        throw new Error(`Failed to generate upload URL for ${file.name}`)
-                    }
+                    if (genError || !genData?.presignedUrl) throw new Error(`Failed to get upload URL for ${file.name}`)
 
                     const uploadRes = await fetch(genData.presignedUrl, {
                         method: 'PUT',
                         body: file,
                         headers: { 'Content-Type': file.type },
                     })
-
-                    if (!uploadRes.ok) {
-                        throw new Error(`Failed to upload ${file.name} to R2`)
-                    }
+                    if (!uploadRes.ok) throw new Error(`Failed to upload ${file.name}`)
                 }
-
-                // 3. Sync (Soft Refresh by pobrać prawdziwe ID z bazy)
                 await refreshSoft?.()
-
             } catch (e) {
-                console.error('Add images flow error:', e)
-                updateLocalItem?.(itemId, { files: prevFiles })
+                console.error(e)
+                updateLocalItem?.(itemId, { files: prevFiles }) // Revert on error
                 throw e
             }
         },
-        [orderId, updateLocalItem, getItemById, refreshSoft]
+        [orderId, getItemById, updateLocalItem, refreshSoft]
     )
 
     const removeImages = useCallback(
-        async (lookupMaybe: string | undefined, itemId: string, imageIds: string[]) => {
-            const lookup = resolveLookup(orderId, lookupMaybe)
-            if (!lookup) throw new Error('Remove images failed: missing lookup')
+        async (itemId: string, imageIds: string[]) => {
+            if (!orderId) throw new Error('Remove images failed: missing orderId')
+            const lookup = resolveLookup(orderId) // ✅ Clean lookup
             if (!imageIds?.length) return
 
-            // 1. Usuwamy pliki z R2 (Edge Function)
             await Promise.all(imageIds.map(async (id) => {
-                const { error } = await supabase.functions.invoke('user_order_item_file_delete', {
-                    body: { file_id: id } // 🛑 file_id
+                if (id.startsWith('temp-')) return 
+                const { error } = await supabase.functions.invoke('user_order_item_file_delete', { 
+                    body: { file_id: id } 
                 })
-                if (error) console.warn(`R2 delete warning for ${id}:`, error)
+                if (error) console.warn(`R2 delete warning for file ${id}:`, error)
             }))
 
-            // 2. Usuwamy z bazy (RPC)
-            const res = await fetch('/api/rpc/user_order_item_file_delete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    p_lookup: lookup,
-                    p_item_id: itemId,
-                    p_file_ids: imageIds.map(String),
-                }),
-            })
+            const realIds = imageIds.filter(id => !id.startsWith('temp-'))
+            
+            if (realIds.length > 0) {
+                 const res = await fetch('/api/rpc/user_order_item_file_delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ p_lookup: lookup, p_item_id: itemId, p_file_ids: realIds }),
+                })
 
-            if (!res.ok) {
-                const msg = await readError(res)
-                throw new Error(`Remove images failed (${res.status})${msg ? `: ${msg}` : ''}`)
+                if (!res.ok) {
+                    const msg = await readError(res)
+                    throw new Error(`Remove images failed: ${msg}`)
+                }
+                
+                const j = await res.json().catch(() => null)
+                const fresh = (j?.item ?? j?.data?.item) as ItemsPanelRowDB | undefined
+                if (fresh?.id) updateLocalItem?.(itemId, fresh)
+            } else {
+                 const currentItem = getItemById(itemId)
+                 if (currentItem) {
+                     const nextFiles = (currentItem.files || []).filter(f => !imageIds.includes(f.id))
+                     updateLocalItem?.(itemId, { ...currentItem, files: nextFiles })
+                 }
             }
-
-            const j = await res.json().catch(() => null)
-            const fresh = (j?.item ?? j?.data?.item) as ItemsPanelRowDB | undefined
-
-            if (fresh?.id) updateLocalItem?.(itemId, fresh)
-            else throw new Error('Remove images failed: Server did not return the updated item.')
         },
-        [orderId, updateLocalItem]
+        [orderId, updateLocalItem, getItemById]
     )
 
     return { addItem, deleteItem, updateItem, addImages, removeImages }

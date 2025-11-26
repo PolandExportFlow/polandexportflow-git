@@ -32,25 +32,25 @@ import {
 	getWeightKg,
 	normalizeDimsFromItem,
 } from './ItemsList.shared'
-import type { ItemsPanelRowDB as Item, ClientFile } from '../clientOrderTypes'
+import type { ItemsPanelRowDB as Item, ClientFile } from '../../clientOrderTypes'
 import { supabase } from '@/utils/supabase/client'
 import clsx from 'clsx'
-
-type ItemPatch = Partial<Item>
 
 type Props = {
 	item: Item | undefined | null
 	alt?: boolean
-	onUpdateItem?: (itemId: string, patch: ItemPatch) => void
+	canEdit?: boolean
+	onUpdateItem?: (itemId: string, patch: Partial<Item>) => void
 	onAddImages?: (itemId: string, files: FileList) => void
-	onRemoveImage?: (itemId: string | number, imageId: string | number) => void | Promise<void>
+	onRemoveImage?: (itemId: string | number, imageId: string | number) => void
 	onThumbClick?: (itemId: string, image: ClientFile) => void
-	onDeleteItem?: (itemId: string) => Promise<void> | void
+	onDeleteItem?: (itemId: string) => void
 }
 
 const ItemsListRow: React.FC<Props> = ({
 	item,
 	alt = false,
+	canEdit = true,
 	onUpdateItem,
 	onAddImages,
 	onRemoveImage,
@@ -74,103 +74,79 @@ const ItemsListRow: React.FC<Props> = ({
 	const displayCode = i.item_number || i.id?.slice(0, 8) || '—'
 	const rowBgClass = alt ? 'bg-[#F5F7FB]' : 'bg-ds-middle-blue'
 	const currentDesc = i.item_note ?? ''
-
 	const images = Array.isArray(i.files) ? i.files : []
 
+	// --- Drag & Drop Logic ---
 	const [isRowDragOver, setIsRowDragOver] = useState(false)
 	const dragDepthRef = useRef(0)
 
-	const allowDrop: React.DragEventHandler<HTMLDivElement> = e => {
-		if (e.dataTransfer?.types?.includes('Files')) {
-			e.preventDefault()
-			e.stopPropagation()
-			e.dataTransfer.dropEffect = 'copy'
-		}
-	}
+	// GŁÓWNY KONTENER: Wykrywa wejście drag
 	const onRowDragEnter: React.DragEventHandler<HTMLDivElement> = e => {
-		if (!e.dataTransfer?.types?.includes('Files')) return
+		if (!canEdit) return
 		e.preventDefault()
 		e.stopPropagation()
 		dragDepthRef.current += 1
 		setIsRowDragOver(true)
 	}
+
 	const onRowDragLeave: React.DragEventHandler<HTMLDivElement> = e => {
-		if (!e.dataTransfer?.types?.includes('Files')) return
+		if (!canEdit) return
 		e.preventDefault()
 		e.stopPropagation()
 		dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
 		if (dragDepthRef.current === 0) setIsRowDragOver(false)
 	}
-	const onRowDrop: React.DragEventHandler<HTMLDivElement> = e => {
-		if (!e.dataTransfer?.files?.length) {
-			setIsRowDragOver(false)
-			dragDepthRef.current = 0
-			return
-		}
-		e.preventDefault()
-		e.stopPropagation()
-		const files = Array.from(e.dataTransfer.files || [])
-		dragDepthRef.current = 0
+
+	// TARCZA / DROP ZONE: To ona odbiera drop
+	const onShieldDrop: React.DragEventHandler<HTMLDivElement> = async e => {
+		if (!canEdit) return
+		e.preventDefault() // ZATRZYMUJE DOMYŚLNE ZACHOWANIE (otwieranie pliku / wklejanie)
+		e.stopPropagation() // ZATRZYMUJE BĄBELKOWANIE DO INPUTÓW
+
 		setIsRowDragOver(false)
-		if (files.length && onAddImages) {
+		dragDepthRef.current = 0
+
+		const files = Array.from(e.dataTransfer?.files || [])
+
+		// Jeśli upuszczono pliki, dodajemy je
+		if (files.length > 0 && onAddImages) {
 			const dt = new DataTransfer()
 			for (const f of files) dt.items.add(f)
 			onAddImages(String(i.id), dt.files)
 		}
+		// Jeśli to nie pliki (np. tekst linku), nic nie robimy.
+		// Dzięki preventDefault wyżej, tekst NIE wpadnie do inputów.
 	}
 
-	const imagesKey = useMemo(
-		() =>
-			images
-				.map(img => {
-					const id = String((img as any)?.id ?? '')
-					const path = (img as any)?.storage_path || ''
-					return `${id}|${path}`
-				})
-				.join('~'),
-		[images]
-	)
-
+	// --- Images Preview Logic ---
+	const imagesKey = useMemo(() => images.map(img => `${img.id}|${img.storage_path}`).join('~'), [images])
 	const [signedMap, setSignedMap] = useState<Record<string, string>>({})
 
 	useEffect(() => {
 		let cancelled = false
 		async function ensureSigned() {
-			if (!images.length) {
-				if (Object.keys(signedMap).length) setSignedMap({})
-				return
-			}
+			if (!images.length) return
 			const pairs = await Promise.all(
 				images.map(async (img, idx) => {
-					const key = String((img as any)?.id ?? idx)
-					const raw = (img as any)?.storage_path || ''
+					const key = String(img.id ?? idx)
+					const raw = img.storage_path || ''
 					const fileUrl = (img as any)?.file_url
-
-					// 1. Blob (lokalny plik zaraz po dodaniu - Optymistic UI)
 					if (fileUrl && String(fileUrl).startsWith('blob:')) return [key, fileUrl] as const
-
-					// 2. Jeśli URL jest już HTTP
 					if (/^https?:\/\//i.test(raw)) return [key, raw] as const
-
-					// 3. Pobranie z R2 przez Edge Function (Atomic logic)
-					if (raw && (img as any).id && !String((img as any).id).startsWith('temp-')) {
+					if (raw && img.id && !String(img.id).startsWith('temp-')) {
 						try {
-							const { data, error } = await supabase.functions.invoke('user_order_file_get_url', {
-								// 🛑 POPRAWKA: file_id zamiast attachment_id
-								body: { file_id: (img as any).id },
-							})
-							if (!error && data?.url) {
-								return [key, data.url] as const
-							}
+							const { data } = await supabase.functions.invoke('user_order_file_get_url', { body: { file_id: img.id } })
+							if (data?.url) return [key, data.url] as const
 						} catch {}
 					}
 					return [key, ''] as const
 				})
 			)
-			if (cancelled) return
-			const next: Record<string, string> = {}
-			for (const [k, v] of pairs) next[k] = v
-			setSignedMap(next)
+			if (!cancelled) {
+				const next: Record<string, string> = {}
+				for (const [k, v] of pairs) next[k] = v
+				setSignedMap(next)
+			}
 		}
 		void ensureSigned()
 		return () => {
@@ -195,16 +171,25 @@ const ItemsListRow: React.FC<Props> = ({
 				isRowDragOver && 'border-2 border-dashed border-green/70 bg-green/5'
 			)}
 			onDragEnter={onRowDragEnter}
-			onDragOver={allowDrop}
+			// Ważne: blokujemy dragover na głównym kontenerze, żeby drop zone mógł działać
+			onDragOver={e => {
+				e.preventDefault()
+			}}
 			onDragLeave={onRowDragLeave}
-			onDrop={onRowDrop}>
-			{isRowDragOver && (
+			onDrop={onShieldDrop}>
+			{isRowDragOver && canEdit && (
 				<div
-					className='pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-lg border-2 border-dashed border-green/70 bg-green/10'
-					aria-hidden='true'>
-					<div className='flex items-center gap-2 px-3 py-2 rounded-md bg-white/90 border border-middle-blue/20'>
+					className='absolute inset-0 z-40 grid place-items-center rounded-lg border-2 border-dashed border-green/70 bg-green/10 cursor-copy'
+					// Tarcza odbiera drop bezpośrednio
+					onDrop={onShieldDrop}
+					onDragOver={e => {
+						e.preventDefault()
+						e.dataTransfer.dropEffect = 'copy'
+					}}
+					onDragLeave={onRowDragLeave}>
+					<div className='flex items-center gap-2 px-3 py-2 rounded-md bg-white/90 border border-middle-blue/20 pointer-events-none'>
 						<UploadCloud className='h-4 w-4' />
-						<span className='text-[13px] md:text-[14px] text-middle-blue/90'>Drop images to add to this item</span>
+						<span className='text-[13px] md:text-[14px] text-middle-blue/90'>Drop images to add</span>
 					</div>
 				</div>
 			)}
@@ -219,66 +204,62 @@ const ItemsListRow: React.FC<Props> = ({
 					</div>
 					<div className='hidden sm:flex items-center gap-2 shrink-0'>
 						{StatusEl}
-						<button
-							type='button'
-							onClick={() => setConfirmOpen(true)}
-							className='p-2 sm:p-3 rounded-lg text-middle-blue opacity-60 hover:opacity-100 hover:bg-middle-blue/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-middle-blue/30 transition'
-							title='Delete item'
-							aria-label='Delete item'>
-							<Trash2 className='w-4 h-4 sm:w-5 sm:h-5' />
-						</button>
+						{canEdit && (
+							<button
+								onClick={() => setConfirmOpen(true)}
+								className='p-2 sm:p-3 rounded-lg text-middle-blue opacity-60 hover:opacity-100 hover:bg-middle-blue/10 transition'
+								title='Delete item'>
+								<Trash2 className='w-4 h-4 sm:w-5 sm:h-5' />
+							</button>
+						)}
 					</div>
-					<button
-						type='button'
-						onClick={() => setConfirmOpen(true)}
-						className='sm:hidden p-2 rounded-lg text-middle-blue opacity-80 hover:opacity-100 hover:bg-middle-blue/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-middle-blue/30 transition shrink-0'
-						title='Delete item'
-						aria-label='Delete item'>
-						<Trash2 className='w-4 h-4' />
-					</button>
+					{canEdit && (
+						<button
+							onClick={() => setConfirmOpen(true)}
+							className='sm:hidden p-2 rounded-lg text-middle-blue opacity-80 hover:opacity-100 hover:bg-middle-blue/10 transition shrink-0'
+							title='Delete item'>
+							<Trash2 className='w-4 h-4' />
+						</button>
+					)}
 				</div>
 				<div className='mt-2 sm:hidden'>{StatusEl}</div>
 				<div className='mt-2 h-px bg-middle-blue/10' />
 			</div>
 
+			{/* FIELDS */}
 			<div className='grid grid-cols-1 gap-2 md:grid md:grid-cols-12'>
 				<div className='min-w-0 md:col-span-6 text-[15px] md:text-[16px]'>
 					<EditableBox
-						icon={<Tag className='h-3.5 w-3.5 text-middle-blue/70' />}
+						icon={<Tag className='h-3.5 w-3.5' />}
 						label='Name'
 						value={i.item_name ?? ''}
 						placeholder='Name…'
-						onCommit={v => onUpdateItem?.(String(i.id), { item_name: String(v ?? '') })}
+						onCommit={v => onUpdateItem?.(String(i.id), { item_name: v })}
 						className='w-full'
+						disabled={!canEdit}
 					/>
 				</div>
-
 				<div className='min-w-0 md:col-span-4'>
 					<EditableBox
-						icon={<LinkIcon className='h-3.5 w-3.5 text-middle-blue/70' />}
+						icon={<LinkIcon className='h-3.5 w-3.5' />}
 						label='Link'
 						value={link}
 						placeholder='https://…'
-						onCommit={v => onUpdateItem?.(String(i.id), { item_url: String(v || '').trim() })}
+						onCommit={v => onUpdateItem?.(String(i.id), { item_url: v })}
+						className='w-full'
+						disabled={!canEdit}
 						after={
 							link ? (
-								<a
-									href={safeHttp(link)}
-									target='_blank'
-									rel='noreferrer'
-									className='opacity-70 transition-opacity duration-200 whitespace-nowrap shrink-0'
-									title='Open link'>
+								<a href={safeHttp(link)} target='_blank' className='opacity-70 hover:opacity-100'>
 									<ExternalLink className='h-3.5 w-3.5' />
 								</a>
 							) : null
 						}
-						className='w-full'
 					/>
 				</div>
-
 				<div className='min-w-0 md:col-span-2 text-[13px]'>
 					<EditableBox
-						icon={<Banknote className='h-3.5 w-3.5 text-middle-blue/70' />}
+						icon={<Banknote className='h-3.5 w-3.5' />}
 						label='Price'
 						value={strNumber(unitValue)}
 						mode='number'
@@ -286,50 +267,50 @@ const ItemsListRow: React.FC<Props> = ({
 						suffix='PLN'
 						onCommit={v => onUpdateItem?.(String(i.id), { item_value: parseLocalizedNumber(v) })}
 						className='w-full px-3'
+						disabled={!canEdit}
 					/>
 				</div>
 			</div>
 
 			<div className='grid grid-cols-1'>
 				<EditableBox
-					icon={<FileText className='h-3.5 w-3.5 text-middle-blue/70' />}
+					icon={<FileText className='h-3.5 w-3.5' />}
 					label='Description'
 					value={currentDesc}
 					placeholder='Short description…'
 					mode='textarea'
-					onCommit={v => onUpdateItem?.(String(i.id), { item_note: String(v ?? '').trim() })}
+					onCommit={v => onUpdateItem?.(String(i.id), { item_note: v })}
 					className='w-full'
+					disabled={!canEdit}
 				/>
 			</div>
 
+			{/* MOBILE TOGGLE */}
 			<div className='sm:hidden'>
 				<button
-					type='button'
 					onClick={() => setExpandedMobile(v => !v)}
 					className='mt-1 inline-flex items-center gap-2 text-[13px] text-middle-blue hover:underline'>
 					{expandedMobile ? 'Show less' : 'Show more'}
 				</button>
 			</div>
 
+			{/* EXPANDABLE FIELDS */}
 			<div className={`${expandedMobile ? 'grid' : 'hidden'} grid-cols-1 md:grid md:grid-cols-12 gap-2`}>
 				<div className='md:col-span-2 min-w-0'>
 					<EditableBox
-						icon={<ListOrdered className='h-3.5 w-3.5 text-middle-blue/70' />}
+						icon={<ListOrdered className='h-3.5 w-3.5' />}
 						label='Quantity'
 						value={String(qty)}
 						mode='number'
 						placeholder='1'
-						onCommit={v => {
-							const n = Number(v)
-							onUpdateItem?.(String(i.id), { item_quantity: Number.isFinite(n) ? Math.max(1, Math.round(n)) : 1 })
-						}}
+						onCommit={v => onUpdateItem?.(String(i.id), { item_quantity: Math.max(1, Math.round(Number(v))) })}
 						className='w-full'
+						disabled={!canEdit}
 					/>
 				</div>
-
 				<div className='md:col-span-2 min-w-0'>
 					<EditableBox
-						icon={<Scale className='h-3.5 w-3.5 text-middle-blue/70' />}
+						icon={<Scale className='h-3.5 w-3.5' />}
 						label='Weight'
 						value={weight ? String(weight) : ''}
 						placeholder='0 kg'
@@ -337,42 +318,44 @@ const ItemsListRow: React.FC<Props> = ({
 						suffix='kg'
 						onCommit={v => onUpdateItem?.(String(i.id), { item_weight: parseLocalizedNumber(v) })}
 						className='w-full'
+						disabled={!canEdit}
 					/>
 				</div>
-
 				<div className='md:col-span-6 grid grid-cols-1 sm:grid-cols-3 gap-2'>
 					<EditableBox
-						icon={<Ruler className='h-3.5 w-3.5 text-middle-blue/70' />}
+						icon={<Ruler className='h-3.5 w-3.5' />}
 						label='Width'
-						value={dims.width_cm ? String(dims.width_cm) : ''}
-						placeholder='0 cm'
+						value={strNumber(dims.width_cm)}
+						placeholder='0'
 						mode='number'
 						suffix='cm'
 						onCommit={v => onUpdateItem?.(String(i.id), { item_width: parseLocalizedNumber(v) })}
 						className='w-full'
+						disabled={!canEdit}
 					/>
 					<EditableBox
-						icon={<Ruler className='h-3.5 w-3.5 text-middle-blue/70' />}
+						icon={<Ruler className='h-3.5 w-3.5' />}
 						label='Height'
-						value={dims.height_cm ? String(dims.height_cm) : ''}
-						placeholder='0 cm'
+						value={strNumber(dims.height_cm)}
+						placeholder='0'
 						mode='number'
 						suffix='cm'
 						onCommit={v => onUpdateItem?.(String(i.id), { item_height: parseLocalizedNumber(v) })}
 						className='w-full'
+						disabled={!canEdit}
 					/>
 					<EditableBox
-						icon={<Ruler className='h-3.5 w-3.5 text-middle-blue/70' />}
+						icon={<Ruler className='h-3.5 w-3.5' />}
 						label='Length'
-						value={dims.length_cm ? String(dims.length_cm) : ''}
-						placeholder='0 cm'
+						value={strNumber(dims.length_cm)}
+						placeholder='0'
 						mode='number'
 						suffix='cm'
 						onCommit={v => onUpdateItem?.(String(i.id), { item_length: parseLocalizedNumber(v) })}
 						className='w-full'
+						disabled={!canEdit}
 					/>
 				</div>
-
 				<div className='md:col-span-2 min-w-0 flex items-center'>
 					<ActionBox
 						label='Photos'
@@ -380,33 +363,30 @@ const ItemsListRow: React.FC<Props> = ({
 						icon={<Plus className='h-3.5 w-3.5' />}
 						onClick={() => fileInputRef.current?.click()}
 						className='w-full'
+						disabled={!canEdit}
 					/>
 				</div>
 			</div>
 
+			{/* THUMBNAILS */}
 			{images.length > 0 && (
 				<div className='mt-3'>
 					<div className='flex flex-wrap gap-2 overflow-visible'>
 						{images.map((img, idx) => {
-							const attId = (img as any)?.id
-							const key = String(attId ?? idx)
+							const key = String(img.id ?? idx)
 							const src = signedMap[key] || ''
-							const title = (img as any)?.file_name || `image-${idx + 1}`
-							const loading = String(attId ?? '').startsWith('temp-') || (img as any)?.mime_type === 'pef/loading'
-
+							const loading = String(img.id).startsWith('temp-')
 							return (
 								<div
 									key={key}
 									className='group/thumb relative h-14 w-14 rounded-md border border-middle-blue/15 bg-white overflow-visible'
-									title={title}>
+									title={img.file_name}>
 									<button
-										type='button'
-										className='block h-full w-full text-left rounded-md overflow-hidden cursor-zoom-in'
 										onClick={() => {
-											if (src && !loading) setPreviewUrl(src)
-											if (onThumbClick) onThumbClick(String(i.id), { ...(img as any), file_url: src } as ClientFile)
+											if (src && !loading && onThumbClick)
+												onThumbClick(String(i.id), { ...img, file_url: src } as ClientFile)
 										}}
-										title='Click to preview'
+										className='block h-full w-full rounded-md overflow-hidden cursor-zoom-in'
 										disabled={loading}>
 										{src ? (
 											<img
@@ -417,35 +397,24 @@ const ItemsListRow: React.FC<Props> = ({
 												}`}
 											/>
 										) : (
-											<div className='h-full w-full grid place-items-center text-[11px] text-middle-blue/60'>…</div>
+											<div className='text-[10px] p-1 text-center text-middle-blue/60'>{img.file_name}</div>
 										)}
 									</button>
-
 									{loading && (
-										<div className='absolute inset-0 bg-white/60 backdrop-blur-[1px] grid place-items-center'>
+										<div className='absolute inset-0 bg-white/60 grid place-items-center'>
 											<Loader2 className='h-4 w-4 animate-spin text-middle-blue' />
 										</div>
 									)}
-
-									{onRemoveImage ? (
+									{canEdit && (
 										<button
-											type='button'
-											title={loading ? 'Uploading…' : 'Remove'}
-											onClick={e => {
-												e.preventDefault()
-												e.stopPropagation()
-												if (!loading && attId) setConfirmImgId(String(attId))
+											onClick={() => {
+												if (!loading && img.id) setConfirmImgId(String(img.id))
 											}}
-											disabled={loading || !attId}
-											className={clsx(
-												'absolute top-0 right-0 translate-x-1/3 -translate-y-1/3',
-												'z-20 inline-flex items-center justify-center h-6 w-6 rounded-full text-white shadow-lg',
-												'bg-middle-blue hover:bg-red transition-colors duration-150',
-												'opacity-100 md:opacity-0 md:group-hover/thumb:opacity-100'
-											)}>
+											disabled={loading}
+											className='absolute top-0 right-0 translate-x-1/3 -translate-y-1/3 z-20 inline-flex items-center justify-center h-6 w-6 rounded-full text-white bg-middle-blue hover:bg-red opacity-100 md:opacity-0 md:group-hover/thumb:opacity-100 transition shadow-md'>
 											<X className='h-3.5 w-3.5' />
 										</button>
-									) : null}
+									)}
 								</div>
 							)
 						})}
@@ -467,36 +436,32 @@ const ItemsListRow: React.FC<Props> = ({
 				}}
 			/>
 
+			{/* MODALS */}
 			<UniversalConfirmModal
 				open={confirmOpen}
 				title='Delete item?'
-				description='This action cannot be undone. Are you sure you want to remove this item?'
 				confirmText='Delete'
 				cancelText='Cancel'
 				tone='danger'
-				size='md'
-				onConfirm={async () => {
-					await onDeleteItem?.(String(i.id))
+				onConfirm={() => {
+					onDeleteItem?.(String(i.id))
 					setConfirmOpen(false)
 				}}
 				onCancel={() => setConfirmOpen(false)}
 			/>
-
 			<UniversalConfirmModal
 				open={confirmImgId !== null}
 				title='Remove image?'
-				description='Do you really want to remove this image?'
 				confirmText='Remove'
 				cancelText='Cancel'
 				tone='danger'
 				size='sm'
 				onConfirm={() => {
-					if (confirmImgId) onRemoveImage?.(String(i.id), String(confirmImgId))
+					if (confirmImgId) onRemoveImage?.(String(i.id), confirmImgId)
 					setConfirmImgId(null)
 				}}
 				onCancel={() => setConfirmImgId(null)}
 			/>
-
 			<UniversalImageModal selectedPhoto={previewUrl} onClose={() => setPreviewUrl(null)} />
 		</div>
 	)

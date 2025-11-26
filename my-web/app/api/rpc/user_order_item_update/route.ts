@@ -9,39 +9,46 @@ const isUUID = (v: string) =>
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({} as any))
-    
-    // Odczytuje p_lookup, p_item_id i p_patch (to jest poprawne)
-    const lookup: string = String(body?.p_lookup ?? '').trim().replace(/^#/, '')
-    const item_id: string = String(body?.p_item_id ?? '').trim()
-    const patch = (body?.p_patch ?? {}) as Record<string, unknown>
+    const body = await req.json().catch(() => null)
 
+    if (!body) {
+        return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+    }
+
+    // Pobieranie i czyszczenie danych
+    const lookup = String(body.p_lookup ?? '').trim().replace(/^#/, '')
+    const item_id = String(body.p_item_id ?? '').trim()
+    const patch = (body.p_patch ?? {}) as Record<string, unknown>
+
+    // Walidacja danych wejściowych
     if (!lookup || !item_id) {
-      return NextResponse.json({ error: 'Bad payload' }, { status: 400 })
+      return NextResponse.json({ error: 'Bad payload: Missing lookup or item_id' }, { status: 400 })
     }
-    if (!isUUID(item_id)) {
-      return NextResponse.json({ error: 'item_id must be UUID' }, { status: 400 })
-    }
-
-    // 🔥 POPRAWKA BŁĘDU KOMPILACJI: Usunięto 'await'. 
-    // funkcja cookies() z 'next/headers' jest synchroniczna.
-    const cookieStore = await cookies()
-
-    const cleanPatch = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))
     
+    if (!isUUID(item_id)) {
+      return NextResponse.json({ error: 'Bad payload: item_id must be UUID' }, { status: 400 })
+    }
+
+    // Przygotowanie patcha (usuwamy undefined)
+    const cleanPatch = Object.fromEntries(
+        Object.entries(patch).filter(([, v]) => v !== undefined)
+    )
+
+    // Jeśli nie ma co aktualizować, zwracamy sukces od razu
     if (Object.keys(cleanPatch).length === 0) {
       return NextResponse.json({ ok: true, message: 'No fields to update' })
     }
+
+    const cookieStore = await cookies()
 
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
         cookies: {
-          // Błąd kompilacji znika, bo cookieStore jest teraz poprawnym obiektem
-          get: (name: string) => cookieStore.get(name)?.value,
-          set: (name: string, value: string, options: any) => { try { cookieStore.set({ name, value, ...options }) } catch {} },
-          remove: (name: string, options: any) => { try { cookieStore.set({ name, value: '', ...options }) } catch {} },
+          get: (name) => cookieStore.get(name)?.value,
+          set: (name, value, options) => { try { cookieStore.set({ name, value, ...options }) } catch {} },
+          remove: (name, options) => { try { cookieStore.set({ name, value: '', ...options }) } catch {} },
         },
       }
     )
@@ -51,17 +58,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Ta logika jest poprawna i przekaże 'cleanPatch' do SQL
+    // Wywołanie bazy
     const { data, error } = await supabase.rpc('user_order_item_update', {
       p_lookup: lookup,
       p_item_id: item_id,
-      p_patch: cleanPatch, 
+      p_patch: cleanPatch,
     })
 
     if (error) {
-      // Błąd 400 (invalid input...) zniknie, gdy serwer się przebuduje z tym kodem
+      // Tutaj zwracamy błąd z SQL (np. ITEM_NOT_FOUND)
       return NextResponse.json({ error: error.message }, { status: 400 })
     }
+    
     return NextResponse.json(data ?? { ok: true })
 
   } catch (e: any) {

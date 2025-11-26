@@ -6,36 +6,24 @@ import { UniversalDetail } from '@/components/ui/UniversalDetail'
 import ItemsListRow from './ItemsListRow'
 import ItemsListSummary from './ItemsListSummary'
 import UniversalImageModal from '@/components/ui/UniversalImageModal'
-import type { ItemsPanelRowDB as Item, ClientFile } from '../clientOrderTypes'
 import { getQty, getUnitValuePLN, getWeightKg } from './ItemsList.shared'
 import { supabase } from '@/utils/supabase/client'
+import type { ClientFile } from '../../clientOrderTypes'
 
-type Props = {
-    items?: Item[]
-    onAddItem?: () => void | Promise<void>
-    onUpdateItem?: (item_id: string, patch: Partial<Item>) => void | Promise<void>
-    onDeleteItem?: (item_id: string) => void | Promise<void>
-    onAddImages?: (item_id: string, files: FileList) => void | Promise<void>
-    onRemoveImage?: (item_id: string, image_id: string | number) => void | Promise<void>
-    onThumbClick?: (item_id: string, image: ClientFile) => void
-}
+// Hooks
+import { useClientOrderModalCtx } from '../../ClientOrderModal.ctx'
+import { useItems } from '../../hooks/useItems'
 
-export default function ItemsListPanel({
-    items = [],
-    onAddItem,
-    onUpdateItem,
-    onDeleteItem,
-    onAddImages,
-    onRemoveImage,
-    onThumbClick,
-}: Props) {
-    const cleanItems = useMemo(() => (items ?? []).filter(Boolean) as Item[], [items])
+export default function ItemsListPanel() {
+    const { data, ui } = useClientOrderModalCtx()
+    const { addItem, updateItem, deleteItem, addImages, removeImages } = useItems()
+
+    const items = data?.itemsPanel || []
+    const cleanItems = useMemo(() => items.filter(Boolean), [items])
+    const canEdit = ui.canEdit // Flaga z useOrderUI (blokada edycji jak submitted)
 
     const summary = useMemo(() => {
-        let totalItems = 0,
-            totalQty = 0,
-            totalValue = 0,
-            totalWeight = 0
+        let totalItems = 0, totalQty = 0, totalValue = 0, totalWeight = 0
         for (const r of cleanItems) {
             totalItems++
             const q = getQty(r)
@@ -49,34 +37,27 @@ export default function ItemsListPanel({
     const [previewUrl, setPreviewUrl] = useState<string | null>(null)
 
     const resolvePreviewUrl = useCallback(async (att: ClientFile): Promise<string | null> => {
-        const local = (att as any)?.file_url as string | undefined
+        const local = (att as any)?.file_url
         if (local) return local
-
         if (!att.id) return null
-
-        // 🛑 POPRAWKA: file_id zamiast attachment_id
+        
+        // Atomic Logic: get from R2
         const { data, error } = await supabase.functions.invoke('user_order_file_get_url', {
-            body: { file_id: att.id }, 
+            body: { file_id: att.id },
         })
-
         if (error) {
             console.error('Preview Error:', error)
             return null
         }
-
         return data?.url || null
     }, [])
 
-    const handleThumb = useCallback(
-        (item_id: string, img: ClientFile) => {
-            if (onThumbClick) return onThumbClick(item_id, img)
-            ;(async () => {
-                const url = await resolvePreviewUrl(img)
-                if (url) setPreviewUrl(url)
-            })()
-        },
-        [onThumbClick, resolvePreviewUrl]
-    )
+    const handleThumb = useCallback((item_id: string, img: ClientFile) => {
+        (async () => {
+            const url = await resolvePreviewUrl(img)
+            if (url) setPreviewUrl(url)
+        })()
+    }, [resolvePreviewUrl])
 
     return (
         <UniversalDetail
@@ -84,17 +65,16 @@ export default function ItemsListPanel({
             icon={<Tag className='h-5 w-5' />}
             className='bg-white border-light-blue'
             collapsible
-            defaultOpen
-            defaultOpenMobile={false}>
+            defaultOpen={true} // Domyślnie otwarte
+            defaultOpenMobile={false}
+        >
             <div data-no-toggle='true' className='mb-3'>
                 <ItemsListSummary
                     totalItems={summary.totalItems}
                     totalQty={summary.totalQty}
                     totalValue={summary.totalValue}
                     totalWeight={summary.totalWeight}
-                    onAddItem={() => {
-                        void onAddItem?.()
-                    }}
+                    onAddItem={canEdit ? () => void addItem() : undefined}
                 />
             </div>
 
@@ -109,18 +89,11 @@ export default function ItemsListPanel({
                             key={String(it.id ?? idx)}
                             item={it}
                             alt={idx % 2 === 1}
-                            onUpdateItem={(id, patch) => {
-                                void onUpdateItem?.(String(id), patch)
-                            }}
-                            onDeleteItem={id => {
-                                void onDeleteItem?.(String(id))
-                            }}
-                            onAddImages={(id, files) => {
-                                void onAddImages?.(String(id), files)
-                            }}
-                            onRemoveImage={(id, imgId) => {
-                                void onRemoveImage?.(String(id), imgId)
-                            }}
+                            canEdit={canEdit} 
+                            onUpdateItem={(id, patch) => updateItem(id, patch)}
+                            onDeleteItem={(id) => deleteItem(id)}
+                            onAddImages={(id, files) => addImages(id, Array.from(files))}
+                            onRemoveImage={(id, imgId) => removeImages(String(id), [String(imgId)])}
                             onThumbClick={handleThumb}
                         />
                     ))}

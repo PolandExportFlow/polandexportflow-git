@@ -4,18 +4,25 @@ import { createServerClient } from '@supabase/ssr'
 
 export const runtime = 'nodejs'
 
+// Tutaj też warto to mieć, bo item_id w bazie to UUID
+const isUUID = (v: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({} as any))
     
-    // Pobieramy dane zgodnie z nowym nazewnictwem w useItems.ts
-    const lookup = String(body?.p_lookup ?? '').trim()
+    const lookup = String(body?.p_lookup ?? '').trim().replace(/^#/, '')
     const item_id = String(body?.p_item_id ?? '').trim()
-    // 🛑 ZMIANA: p_file_ids zamiast p_attachment_ids
     const file_ids = Array.isArray(body?.p_file_ids) ? body.p_file_ids : []
 
     if (!lookup || !item_id || file_ids.length === 0) {
       return NextResponse.json({ error: 'Bad payload: missing lookup, item_id or file_ids' }, { status: 400 })
+    }
+
+    // Zabezpieczenie
+    if (!isUUID(item_id)) {
+       return NextResponse.json({ error: 'Bad payload: item_id must be UUID' }, { status: 400 })
     }
 
     const cookieStore = await cookies()
@@ -37,11 +44,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Wywołanie poprawnej funkcji RPC dla plików przedmiotów
     const { data, error } = await supabase.rpc('user_order_item_file_delete', {
       p_lookup: lookup,
       p_item_id: item_id,
-      p_file_ids: file_ids // <--- Przekazujemy tablicę ID plików
+      p_file_ids: file_ids 
     })
 
     if (error) {

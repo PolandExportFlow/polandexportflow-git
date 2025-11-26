@@ -2,14 +2,13 @@
 
 import React, { useMemo } from 'react'
 import { Truck, Percent, TrendingUp, Calculator, Tag, Equal, ScrollText } from 'lucide-react'
-
 import UniversalDetailOption from '@/components/ui/UniversalDetailOption'
 import { getLogo } from '@/utils/getLogo'
-import type { ShippingQuote, MethodCode, Currency, CheckoutBreakdown } from '../../clientOrderTypes'
+import type { ShippingQuote, MethodCode, Currency, PaymentBreakdown } from '../../clientOrderTypes'
 
 type Props = {
     currency: Currency
-    breakdown: CheckoutBreakdown
+    breakdown: PaymentBreakdown
     methodKey: MethodCode | string
     effectiveQuote?: ShippingQuote
     fromPLN: (amountPLN: number, c?: Currency | string) => number
@@ -39,15 +38,13 @@ const defaultCarrierHeights: Record<string, number> = {
     pocztapolska: 20,
 }
 
-// ZMIANA: Zaktualizowana i uproszczona mapa defaultPaymentHeights
 const defaultPaymentHeights: Partial<Record<MethodCode | 'stripe', number>> = {
     paypal: 16,
     revolut: 16,
-    // Dodano 'stripe' jako ogólną wysokość dla płatności elektronicznych (powiększone logo)
     stripe: 26, 
 }
 
-export default function CheckoutSummary({
+export default function PaymentSummary({
     currency,
     breakdown,
     methodKey,
@@ -60,13 +57,10 @@ export default function CheckoutSummary({
         [fromPLN, format, currency]
     )
 
-    // payment
     const methodKeyStr = String(methodKey || 'paypal').toLowerCase()
     const paymentLogoSrc = getLogo('payment', methodKeyStr) || ''
-    // Używamy klucza methodKeyStr (który może być 'stripe') do pobrania wysokości.
     const paymentH = defaultPaymentHeights[methodKeyStr as 'stripe'] ?? 16 
 
-    // carrier (snake_case)
     const carrierLabel = effectiveQuote?.quote_carrier || 'No quote'
     const carrierKeyStr = carrierKeyFromLabel(carrierLabel)
     const carrierLogoSrc = getLogo('carrier', carrierKeyStr) || ''
@@ -74,10 +68,11 @@ export default function CheckoutSummary({
 
     const paymentMethodLabel = methodKeyStr.toUpperCase() || '—'
 
+    // ✅ ZMIANA NAZWY NA BARDZIEJ PRECYZYJNĄ
     const title = (
         <>
-            Service Receipt{' '}
-            <span className='opacity-70 text-[13px]'>
+            Payment Breakdown{' '}
+            <span className='opacity-60 text-[13px] font-normal ml-1'>
                 ({carrierLabel}, {currency}, {paymentMethodLabel})
             </span>
         </>

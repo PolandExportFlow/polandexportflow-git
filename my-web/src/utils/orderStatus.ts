@@ -1,24 +1,7 @@
-// components/dashboard/b2c/Orders/types/OrderStatus.ts
 import { Plane, XCircle, CheckCircle2, Package, Calculator, FileText, FilePlus } from "lucide-react"
 
-export type OrderStatus =
-  | "created"
-  | "submitted"
-  | "quote_ready"
-  | "preparing_order"
-  | "shipped"
-  | "delivered"
-  | "cancelled"
-
-export interface StatusConfig {
-  bgColor: string
-  textColor: string
-  icon: any
-  text: string
-}
-
-/** Kolejność do UI */
-export const UI_STATUSES: OrderStatus[] = [
+// 1. Definiujemy tablicę jako "as const" - to jest nasze jedyne źródło prawdy
+export const UI_STATUSES = [
   "created",
   "submitted",
   "quote_ready",
@@ -26,7 +9,16 @@ export const UI_STATUSES: OrderStatus[] = [
   "shipped",
   "delivered",
   "cancelled",
-]
+] as const
+
+export type OrderStatus = (typeof UI_STATUSES)[number]
+
+export interface StatusConfig {
+  bgColor: string
+  textColor: string
+  icon: any
+  text: string
+}
 
 /** Minimalny, stały config (bez progressów) */
 const CONFIGS: Record<OrderStatus, StatusConfig> = {
@@ -75,8 +67,11 @@ const CONFIGS: Record<OrderStatus, StatusConfig> = {
 }
 
 /** Helper: rzutuje na kanoniczny status lub zwraca 'created' */
-const toStatus = (s: string | null | undefined): OrderStatus =>
-  (UI_STATUSES as readonly string[]).includes(String(s)) ? (s as OrderStatus) : "created"
+const toStatus = (s: string | null | undefined): OrderStatus => {
+  // Rzutujemy na string[], żeby TS nie krzyczał przy includes na readonly tuple
+  const valid = (UI_STATUSES as readonly string[]).includes(String(s))
+  return valid ? (s as OrderStatus) : "created"
+}
 
 /** Zawsze zwróci config */
 export const getStatusConfig = (status: OrderStatus | string | null | undefined): StatusConfig =>

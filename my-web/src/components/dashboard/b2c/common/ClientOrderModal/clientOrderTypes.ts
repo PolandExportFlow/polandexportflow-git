@@ -1,8 +1,9 @@
 export type Currency = 'PLN' | 'EUR' | 'USD' | 'GBP'
+
 export type MethodCode = 
-    'paypal' | 
-    'revolut' | 
-    'stripe';
+    | 'paypal' 
+    | 'revolut' 
+    | 'stripe';
 
 export type OrderPaymentMethodRow = {
     payment_code: MethodCode | string
@@ -79,7 +80,7 @@ export type OrderItemRow = {
     item_width: number | null
     item_height: number | null
     created_at: string | null
-    item_number: number | null
+    item_number: string | null // ✅ ZMIANA: string (zgodnie z bazą)
 }
 
 export type OrderFileRow = {
@@ -123,7 +124,7 @@ export type ShippingQuote = {
     selected?: boolean | null
 }
 
-export type CheckoutBreakdown = {
+export type PaymentBreakdown = {
     productsPLN: number
     shippingPLN: number
     serviceFeePct: number
@@ -151,7 +152,7 @@ export type StatusPanelDB = {
 }
 export type ClientFile = StatusPanelDB['files'][number]
 
-export type CheckoutPanelDB = {
+export type PaymentPanelDB = {
     payment_currency: Currency
     payment_method_code: MethodCode
     payment_status: string
@@ -194,7 +195,7 @@ export type TrackingPanelDB = {
 
 export type ItemsPanelRowDB = {
     id: string
-    item_number: number | null
+    item_number: string | null // ✅ ZMIANA: string
     item_status: string | null
     item_name: string | null
     item_url?: string | null
@@ -205,6 +206,7 @@ export type ItemsPanelRowDB = {
     item_length: number | null
     item_width: number | null
     item_height: number | null
+    created_at: string | null
     files: Array<{
         id: string
         file_name: string
@@ -217,7 +219,7 @@ export type ItemsPanelRowDB = {
 
 export type ClientOrderModalPayload = {
     statusPanel: StatusPanelDB
-    checkoutPanel: CheckoutPanelDB
+    paymentPanel: PaymentPanelDB 
     addressPanel: AddressPanelDB
     trackingPanel: TrackingPanelDB
     itemsPanel: ItemsPanelRowDB[]

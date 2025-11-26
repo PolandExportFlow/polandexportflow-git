@@ -10,79 +10,57 @@ const ENDPOINT_GET_DEFAULT = '/api/rpc/user_get_default_address'
 async function readError(res: Response) {
     try {
         const j = await res.json()
-        if (j?.error) return String(j.error)
-        if (j?.message) return String(j.message)
-        return JSON.stringify(j)
-    } catch {
-        try {
-            return await res.text()
-        } catch {
-            return ''
-        }
-    }
+        return j?.error || j?.message || JSON.stringify(j)
+    } catch { return await res.text().catch(() => '') }
 }
 
 export function useAddress() {
-    const { updateLocalAddress, refreshSoft } = useClientOrderModalCtx()
+    const { orderId, updateLocalAddress, refreshSoft } = useClientOrderModalCtx()
 
     const updateAddress = useCallback(
-        async (orderNumber: string, patch: Partial<AddressPanelDB>) => {
+        async (patch: Partial<AddressPanelDB>) => {
+            if (!orderId) return
+            
+            // 1. Optimistic
             updateLocalAddress?.(patch)
 
             try {
+                // 2. RPC
                 const res = await fetch(ENDPOINT_UPDATE, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ lookup: orderNumber, patch }),
+                    body: JSON.stringify({ lookup: orderId, patch }),
                 })
 
                 if (!res.ok) {
                     const msg = await readError(res)
-                    throw new Error(`user_order_update_address failed (${res.status})${msg ? `: ${msg}` : ''}`)
+                    throw new Error(`Update address failed: ${msg}`)
                 }
             } catch (e) {
+                console.error(e)
+                // 3. Revert / Sync on error
                 await refreshSoft?.()
                 throw e
             }
         },
-        [updateLocalAddress, refreshSoft]
+        [orderId, updateLocalAddress, refreshSoft]
     )
 
-    const loadAndSetDefaultAddress = useCallback(
-        async (orderNumber: string) => {
-            let patch: Partial<AddressPanelDB>
-
-            try {
-                const res = await fetch(ENDPOINT_GET_DEFAULT, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    cache: 'no-store',
-                })
-
-                if (!res.ok) {
-                    const msg = await readError(res)
-                    throw new Error(`user_get_default_address failed (${res.status})${msg ? `: ${msg}` : ''}`)
-                }
-
-                patch = (await res.json()) as Partial<AddressPanelDB>
-
-                if (!patch || Object.keys(patch).length === 0) {
-                    throw new Error('No default address data found for user')
-                }
-            } catch (e) {
-                console.error(e)
-                throw e
-            }
-
-            try {
-                await updateAddress(orderNumber, patch)
-            } catch (e) {
-                console.error('Failed to apply default address to order', e)
-                throw e
-            }
-        },
-        [updateAddress]
-    )
+    const loadAndSetDefaultAddress = useCallback(async () => {
+        if (!orderId) return
+        try {
+            const res = await fetch(ENDPOINT_GET_DEFAULT, { method: 'POST' })
+            if (!res.ok) throw new Error('Failed to get default address')
+            
+            const patch = (await res.json()) as Partial<AddressPanelDB>
+            if (!patch || !Object.keys(patch).length) throw new Error('No default address found')
+            
+            await updateAddress(patch)
+        } catch (e) {
+            console.error('Default address error', e)
+            throw e
+        }
+    }, [orderId, updateAddress])
 
     return { updateAddress, loadAndSetDefaultAddress }
 }

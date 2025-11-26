@@ -28,7 +28,6 @@ import UniversalImageModal from '@/components/ui/UniversalImageModal'
 import type { Item } from './ItemsStep'
 import type { AddressModel, ServiceType } from '../requestTypes'
 import { getCountryInfoByName } from '@/utils/country/countryHelper'
-// Importujemy helpery
 import { toQty, toNumOrZero } from '@/utils/newRequestFormHelper'
 
 export default function SummaryStep({
@@ -62,10 +61,8 @@ export default function SummaryStep({
 
     const serviceLabel = service || ''
 
-    // Ikona zależna od wybranej usługi
     const ServiceIcon = service === 'Parcel Forwarding' ? Truck : service === 'Assisted Purchase' ? ShoppingCart : null
 
-    // Flaga kraju
     const countryName = address?.order_country
     const countryInfo = useMemo(() => getCountryInfoByName(countryName), [countryName])
     const countryCode = countryInfo?.code
@@ -77,9 +74,7 @@ export default function SummaryStep({
             icon={<FileCheck className='h-6 w-6 md:w-7 md:h-7 text-middle-blue' />}
             title='Review & confirm'
             onBack={onBack}
-            // Jeśli onSubmit jest undefined (bo isLoading=true w rodzicu), przycisk będzie disabled
             onContinue={onSubmit}
-            // Zmieniamy etykietę przycisku w zależności od stanu (opcjonalnie, bo mamy overlay)
             continueLabel={isLoading ? (isUploading ? 'Uploading...' : 'Creating Order...') : 'Submit Order'}
             contentClassName='space-y-2 md:space-y-3'>
             
